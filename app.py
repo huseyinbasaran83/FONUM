@@ -5,7 +5,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: Hassas Analiz", layout="wide")
+st.set_page_config(page_title="Zenith Pro: Full Analiz", layout="wide")
 
 # --- 1. VERİTABANI: FON İÇERİKLERİ ---
 fund_composition = {
@@ -33,7 +33,6 @@ def get_live_price(ticker):
         return float(data['Close'].iloc[-1]) if not data.empty else None
     except: return None
 
-# Güncel fiyatlarda da hassasiyeti korumak için 6 basamak formatı kullanılabilir
 live_fund_prices = {"AFT": 185.402134, "TCD": 12.805567, "MAC": 245.150000, "GUM": 0.451234, "TI3": 4.129876}
 
 # --- 3. SESSION STATE ---
@@ -45,8 +44,7 @@ with st.sidebar:
     st.header("📥 Yeni Fon Girişi")
     f_code = st.text_input("Fon Kodu").upper()
     f_qty = st.number_input("Adet", min_value=0.000001, value=1.0, format="%.6f")
-    # Hassasiyeti 6 basamağa çıkardık
-    f_cost = st.number_input("Alış Maliyeti (TL)", min_value=0.000001, value=0.000000, format="%.6f")
+    f_cost = st.number_input("Alış Maliyeti (TL)", min_value=0.000001, format="%.6f")
     f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=365))
     
     if st.button("➕ Portföye Ekle", use_container_width=True):
@@ -58,4 +56,38 @@ with st.sidebar:
                     g_old = (g_ons_old / 31.10) * u_old
                     st.session_state.portfolio.append({
                         "kod": f_code, "adet": f_qty, "maliyet": f_cost, "tarih": f_date,
-                        "usd_maliyet": u_old, "
+                        "usd_maliyet": u_old, "gold_maliyet": g_old
+                    })
+                    st.rerun()
+
+# --- 5. ANA EKRAN ---
+st.title("🛡️ Zenith Pro: Hassas Analiz Paneli")
+
+if st.session_state.portfolio:
+    st.subheader("⚙️ Portföy Yönetimi")
+    usd_now = get_live_price("USDTRY=X")
+    gold_now = (get_live_price("GC=F") / 31.10) * usd_now if usd_now else 1
+    
+    for idx, item in enumerate(st.session_state.portfolio):
+        c_name, c_qty, c_cost, c_date, c_del = st.columns([1, 1, 1.2, 1.3, 0.5])
+        
+        with c_name:
+            st.write(f"**{item['kod']}**")
+        with c_qty:
+            st.session_state.portfolio[idx]['adet'] = st.number_input("Adet", value=float(item['adet']), key=f"q_{idx}", format="%.6f")
+        with c_cost:
+            st.session_state.portfolio[idx]['maliyet'] = st.number_input("Maliyet", value=float(item['maliyet']), key=f"m_{idx}", format="%.6f")
+        with c_date:
+            new_date = st.date_input("Tarih", value=item['tarih'], key=f"d_{idx}")
+            if new_date != item['tarih']:
+                with st.spinner("Kurlar güncelleniyor..."):
+                    u_old = get_historical_data("USDTRY=X", new_date)
+                    g_ons_old = get_historical_data("GC=F", new_date)
+                    if u_old and g_ons_old:
+                        st.session_state.portfolio[idx]['tarih'] = new_date
+                        st.session_state.portfolio[idx]['usd_maliyet'] = u_old
+                        st.session_state.portfolio[idx]['gold_maliyet'] = (g_ons_old / 31.10) * u_old
+                        st.rerun()
+        with c_del:
+            if st.button("🗑️", key=f"del_{idx}"):
+                st.session_
