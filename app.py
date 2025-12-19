@@ -5,9 +5,18 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: Yönetim & Reel Getiri", layout="wide")
+st.set_page_config(page_title="Zenith Pro: Tam Kapsamlı Analiz", layout="wide")
 
-# --- VERİ ÇEKME MOTORU ---
+# --- 1. VERİTABANI: FON İÇERİKLERİ (RÖNTGEN) ---
+fund_composition = {
+    "AFT": {"detay": {"NVIDIA": 0.18, "APPLE": 0.15, "MICROSOFT": 0.12, "ALPHABET": 0.10, "NAKİT": 0.45}},
+    "TCD": {"detay": {"TÜPRAŞ": 0.15, "KOÇ HOLDİNG": 0.12, "ASELSAN": 0.10, "THY": 0.08, "ALTIN": 0.15, "NAKİT": 0.40}},
+    "MAC": {"detay": {"THY": 0.18, "BİMAS": 0.14, "EREĞLİ": 0.12, "SAHOL": 0.10, "MGROS": 0.08, "DİĞER": 0.38}},
+    "GUM": {"detay": {"GÜMÜŞ": 0.95, "NAKİT": 0.05}},
+    "TI3": {"detay": {"FROTO": 0.15, "SISE": 0.12, "TOASO": 0.10, "KCHOL": 0.08, "DİĞER": 0.45}}
+}
+
+# --- 2. VERİ ÇEKME MOTORU ---
 @st.cache_data(ttl=3600)
 def get_historical_data(ticker, date_obj):
     try:
@@ -15,25 +24,22 @@ def get_historical_data(ticker, date_obj):
         end_str = (date_obj + timedelta(days=7)).strftime('%Y-%m-%d')
         data = yf.download(ticker, start=start_str, end=end_str, progress=False)
         return float(data['Close'].iloc[0]) if not data.empty else None
-    except:
-        return None
+    except: return None
 
 @st.cache_data(ttl=600)
 def get_live_price(ticker):
     try:
         data = yf.download(ticker, period="5d", progress=False)
         return float(data['Close'].iloc[-1]) if not data.empty else None
-    except:
-        return None
+    except: return None
 
-# Sabit Fon Fiyatları (Örnek)
-live_fund_prices = {"AFT": 185.40, "TCD": 12.80, "MAC": 245.15, "GUM": 0.45, "TI3": 4.12, "ZRE": 115.30}
+live_fund_prices = {"AFT": 185.40, "TCD": 12.80, "MAC": 245.15, "GUM": 0.45, "TI3": 4.12}
 
-# --- Session State ---
+# --- 3. SESSION STATE ---
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# --- Sidebar: Yeni Kayıt ---
+# --- 4. SIDEBAR: GİRİŞ ---
 with st.sidebar:
     st.header("📥 Yeni Fon Girişi")
     f_code = st.text_input("Fon Kodu").upper()
@@ -42,7 +48,7 @@ with st.sidebar:
     f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=365))
     
     if st.button("➕ Portföye Ekle", use_container_width=True):
-        if f_code and f_cost > 0:
+        if f_code:
             with st.spinner("Kurlar alınıyor..."):
                 u_old = get_historical_data("USDTRY=X", f_date)
                 g_ons_old = get_historical_data("GC=F", f_date)
@@ -53,33 +59,23 @@ with st.sidebar:
                         "usd_maliyet": u_old, "gold_maliyet": g_old
                     })
                     st.rerun()
-                else:
-                    st.error("O tarihe ait kur verisi bulunamadı.")
 
-# --- Ana Ekran ---
-st.title("🛡️ Zenith: Yönetim & Reel Performans")
+# --- 5. ANA EKRAN ---
+st.title("🛡️ Zenith Pro: 360° Portföy Agent")
 
 if st.session_state.portfolio:
-    # 1. YÖNETİM VE DÜZENLEME PANELİ
-    st.subheader("⚙️ Portföy Yönetimi (Düzenle/Sil)")
-    
-    # Güncel kurları bir kez çekelim
+    # --- YÖNETİM PANELİ ---
+    st.subheader("⚙️ Portföy Yönetimi")
     usd_now = get_live_price("USDTRY=X")
-    gold_ons_now = get_live_price("GC=F")
-    gold_now = (gold_ons_now / 31.10) * usd_now if usd_now and gold_ons_now else 1
+    gold_now = (get_live_price("GC=F") / 31.10) * usd_now
     
-    # Satır satır düzenleme alanı
     for idx, item in enumerate(st.session_state.portfolio):
-        c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1.5, 2, 0.5])
-        with c1:
-            st.write(f"**{item['kod']}**\n*{item['tarih']}*")
-        with c2:
-            st.session_state.portfolio[idx]['adet'] = st.number_input("Adet", value=float(item['adet']), key=f"q_{idx}")
-        with c3:
-            st.session_state.portfolio[idx]['maliyet'] = st.number_input("Maliyet", value=float(item['maliyet']), key=f"m_{idx}")
+        c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 2, 0.5])
+        with c1: st.write(f"**{item['kod']}**\n{item['tarih']}")
+        with c2: st.session_state.portfolio[idx]['adet'] = st.number_input("Adet", value=float(item['adet']), key=f"q_{idx}")
+        with c3: st.session_state.portfolio[idx]['maliyet'] = st.number_input("Maliyet", value=float(item['maliyet']), key=f"m_{idx}")
         with c4:
-            curr_p = live_fund_prices.get(item['kod'], item['maliyet'] * 1.2)
-            val = st.session_state.portfolio[idx]['adet'] * curr_p
+            val = st.session_state.portfolio[idx]['adet'] * live_fund_prices.get(item['kod'], item['maliyet']*1.1)
             st.write(f"Güncel Değer: **{val:,.2f} ₺**")
         with c5:
             if st.button("🗑️", key=f"del_{idx}"):
@@ -88,29 +84,42 @@ if st.session_state.portfolio:
 
     st.divider()
 
-    # 2. ANALİZ VE RAPORLAMA
+    # --- HESAPLAMALAR ---
     df = pd.DataFrame(st.session_state.portfolio)
-    df['Güncel Fiyat'] = df['kod'].map(live_fund_prices).fillna(df['maliyet'] * 1.2)
-    df['Güncel Değer'] = df['adet'] * df['Güncel Fiyat']
-    df['Toplam Maliyet'] = df['adet'] * df['maliyet']
-    
-    # Reel Getiri Hesaplama
-    df['USD Fark %'] = ((df['Güncel Değer'] / usd_now) / (df['Toplam Maliyet'] / df['usd_maliyet']) - 1) * 100
-    df['Altın Fark %'] = ((df['Güncel Değer'] / gold_now) / (df['Toplam Maliyet'] / df['gold_maliyet']) - 1) * 100
+    df['Güncel Fiyat'] = df['kod'].map(live_fund_prices).fillna(df['maliyet'] * 1.1)
+    df['G. Değer'] = df['adet'] * df['Güncel Fiyat']
+    df['T. Maliyet'] = df['adet'] * df['maliyet']
+    df['USD Fark %'] = ((df['G. Değer'] / usd_now) / (df['T. Maliyet'] / df['usd_maliyet']) - 1) * 100
+    df['Altın Fark %'] = ((df['G. Değer'] / gold_now) / (df['T. Maliyet'] / df['gold_maliyet']) - 1) * 100
 
-    # Üst Metrikler
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Toplam Portföy", f"{df['Güncel Değer'].sum():,.2f} ₺")
-    m2.metric("USD Reel Getiri (Ort)", f"% {df['USD Fark %'].mean():.2f}")
-    m3.metric("Altın Reel Getiri (Ort)", f"% {df['Altın Fark %'].mean():.2f}")
+    # --- ANALİZ SEKMELERİ ---
+    tab1, tab2 = st.tabs(["📈 Reel Performans", "💎 Varlık Röntgeni"])
 
-    # Rapor Tablosu
-    st.subheader("📊 Reel Performans Raporu")
-    st.dataframe(df[['kod', 'tarih', 'USD Fark %', 'Altın Fark %']].style.background_gradient(cmap='RdYlGn', subset=['USD Fark %', 'Altın Fark %']), use_container_width=True)
+    with tab1:
+        st.subheader("Döviz ve Altın Karşısındaki Durum")
+        st.dataframe(df[['kod', 'tarih', 'USD Fark %', 'Altın Fark %']].style.background_gradient(cmap='RdYlGn'), use_container_width=True)
+        st.plotly_chart(px.bar(df, x='kod', y=['USD Fark %', 'Altın Fark %'], barmode='group'), use_container_width=True)
 
-    # Grafik
-    
-    st.plotly_chart(px.bar(df, x='kod', y=['USD Fark %', 'Altın Fark %'], barmode='group', title="Döviz & Altın Karşısındaki Durum"), use_container_width=True)
+    with tab2:
+        st.subheader("Fonların İçindeki Gerçek Varlık Dağılımı")
+        asset_map = {}
+        for _, row in df.iterrows():
+            comp = fund_composition.get(row['kod'], {"detay": {"DİĞER": 1.0}})['detay']
+            for asset, ratio in comp.items():
+                asset_map[asset] = asset_map.get(asset, 0) + (row['G. Değer'] * ratio)
+        
+        breakdown_df = pd.DataFrame(list(asset_map.items()), columns=['Varlık', 'Değer']).sort_values(by='Değer', ascending=False)
+        
+        col_c, col_t = st.columns([1.5, 1])
+        with col_c:
+            st.plotly_chart(px.pie(breakdown_df, values='Değer', names='Varlık', hole=0.4), use_container_width=True)
+        with col_t:
+            st.write("**Enstrüman Bazlı TL Büyüklük**")
+            st.table(breakdown_df.style.format({'Değer': '{:,.2f} ₺'}))
+
+    # --- ALT METRİKLER ---
+    st.divider()
+    st.metric("Toplam Portföy Değeri", f"{df['G. Değer'].sum():,.2f} ₺")
 
 else:
-    st.info("Portföy boş. Sol taraftan fon ekleyerek başlayın.")
+    st.info("Lütfen sol panelden veri girişi yapın.")
