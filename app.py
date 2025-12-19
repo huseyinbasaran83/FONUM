@@ -2,53 +2,57 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from fpdf import FPDF
-import base64
 
 # Sayfa Ayarları
 st.set_page_config(page_title="Zenith Portföy Pro", layout="wide")
 
 # --- Agent Veri Modeli (Gelişmiş İçerik Dağılımı) ---
 fund_details = {
-    "AFT": {"hisse": 0.95, "nakit": 0.05, "emtia": 0.00, "sektor": "Teknoloji", "bolge": "ABD"},
-    "TCD": {"hisse": 0.60, "nakit": 0.20, "emtia": 0.20, "sektor": "Karma", "bolge": "Türkiye"},
-    "MAC": {"hisse": 0.90, "nakit": 0.10, "emtia": 0.00, "sektor": "Hisse Yoğun", "bolge": "Türkiye"},
-    "GUM": {"hisse": 0.00, "nakit": 0.10, "emtia": 0.90, "sektor": "Değerli Maden", "bolge": "Küresel"}
+    "AFT": {"hisse": 0.95, "nakit": 0.05, "emtia": 0.00, "sektor": "Teknoloji"},
+    "TCD": {"hisse": 0.60, "nakit": 0.20, "emtia": 0.20, "sektor": "Karma"},
+    "MAC": {"hisse": 0.90, "nakit": 0.10, "emtia": 0.00, "sektor": "Hisse Yogun"},
+    "GUM": {"hisse": 0.00, "nakit": 0.10, "emtia": 0.90, "sektor": "Degerli Maden"}
 }
 
-# --- Session State ---
+# --- Session State (Veritabanı Alternatifi) ---
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# --- PDF Rapor Fonksiyonu ---
-def create_pdf(df, total_tl, summary_data):
+# --- PDF Rapor Fonksiyonu (Türkçe Karakter Hatası Giderilmiş) ---
+def create_pdf(df, total_tl):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(200, 10, "Zenith Portfoy Analiz Raporu", ln=True, align='C')
+    # Türkçe karakterleri güvenli karakterlere çeviriyoruz
+    def safe_str(text):
+        tr_map = str.maketrans("ğĞüÜşŞİıöÖçÇ", "gGuUsSIioOcC")
+        return str(text).translate(tr_map)
+
+    pdf.cell(200, 10, safe_str("Zenith Portfoy Analiz Raporu"), ln=True, align='C')
     pdf.ln(10)
     
     pdf.set_font("Arial", "", 12)
-    pdf.cell(200, 10, f"Toplam Portfoy Degeri: {total_tl:,.2f} TL", ln=True)
+    pdf.cell(200, 10, safe_str(f"Toplam Portfoy Degeri: {total_tl:,.2f} TL"), ln=True)
     pdf.ln(5)
     
     pdf.set_font("Arial", "B", 11)
-    pdf.cell(50, 10, "Fon Kodu")
-    pdf.cell(50, 10, "Adet")
-    pdf.cell(50, 10, "Toplam Değer")
+    pdf.cell(60, 10, safe_str("Fon Kodu"))
+    pdf.cell(60, 10, safe_str("Adet"))
+    pdf.cell(60, 10, safe_str("Toplam Deger"))
     pdf.ln()
     
     pdf.set_font("Arial", "", 10)
     for _, row in df.iterrows():
-        pdf.cell(50, 10, str(row['kod']))
-        pdf.cell(50, 10, str(row['adet']))
-        pdf.cell(50, 10, f"{row['Toplam TL']:,.2f} TL")
+        pdf.cell(60, 10, safe_str(row['kod']))
+        pdf.cell(60, 10, safe_str(row['adet']))
+        pdf.cell(60, 10, safe_str(f"{row['Toplam TL']:,.2f} TL"))
         pdf.ln()
         
-    return pdf.output(dest='S').encode('latin-1')
+    return pdf.output(dest='S').encode('latin-1', errors='ignore')
 
 # --- Sidebar ---
 with st.sidebar:
-    st.header("📥 Portföy Girişi")
+    st.header("📥 Portfoy Yonetimi")
     f_code = st.text_input("Fon Kodu").upper()
     f_qty = st.number_input("Adet", min_value=1)
     f_price = st.number_input("Birim Fiyat", min_value=0.0)
@@ -58,65 +62,56 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    if st.button("🗑️ Tümünü Temizle"):
+    if st.button("🗑️ Portfoyu Sıfırla"):
         st.session_state.portfolio = []
         st.rerun()
 
 # --- Ana Ekran ---
-st.title("🛡️ Zenith Portföy Pro: Analiz & Rapor")
+st.title("🛡️ Zenith Portföy Pro")
 
 if st.session_state.portfolio:
     df = pd.DataFrame(st.session_state.portfolio)
     df['Toplam TL'] = df['adet'] * df['fiyat']
     total_tl = df['Toplam TL'].sum()
 
-    # 1. VARLIK DAĞILIMI HESAPLAMA (AGENT)
-    hisse_toplam = 0
-    emtia_toplam = 0
-    nakit_toplam = 0
-
+    # Varlık Dağılım Hesaplama
+    h_toplam, e_toplam, n_toplam = 0, 0, 0
     for _, row in df.iterrows():
-        detail = fund_details.get(row['kod'], {"hisse": 0.5, "nakit": 0.3, "emtia": 0.2})
-        hisse_toplam += row['Toplam TL'] * detail['hisse']
-        emtia_toplam += row['Toplam TL'] * detail['emtia']
-        nakit_toplam += row['Toplam TL'] * detail['nakit']
+        det = fund_details.get(row['kod'], {"hisse": 0.5, "nakit": 0.3, "emtia": 0.2})
+        h_toplam += row['Toplam TL'] * det['hisse']
+        e_toplam += row['Toplam TL'] * det['emtia']
+        n_toplam += row['Toplam TL'] * det['nakit']
 
-    summary_data = pd.DataFrame({
-        "Enstrüman": ["Hisse Senedi", "Emtia", "Nakit/Diğer"],
-        "Değer": [hisse_toplam, emtia_toplam, nakit_toplam]
-    })
-
-    # 2. GÖRSELLEŞTİRME
+    # Görselleştirme
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📊 Fon Dağılımı")
-        fig1 = px.pie(df, values='Toplam TL', names='kod', hole=0.3)
-        st.plotly_chart(fig1, use_container_width=True)
+        st.subheader("📊 Fon Dagılımı")
+        st.plotly_chart(px.pie(df, values='Toplam TL', names='kod', hole=0.3), use_container_width=True)
     
     with col2:
-        st.subheader("🔍 Gerçek Enstrüman Maruziyeti")
-        fig2 = px.pie(summary_data, values='Değer', names='Enstrüman', 
-                     color_discrete_sequence=px.colors.sequential.Teal)
-        st.plotly_chart(fig2, use_container_width=True)
+        st.subheader("🔍 Enstrüman Maruziyeti")
+        summary = pd.DataFrame({"Tip": ["Hisse", "Emtia", "Nakit"], "Deger": [h_toplam, e_toplam, n_toplam]})
+        st.plotly_chart(px.pie(summary, values='Deger', names='Tip', color_discrete_sequence=px.colors.qualitative.Set3), use_container_width=True)
 
-    # 3. RAPORLAMA BUTONLARI
+    # İşlemler
     st.divider()
     c1, c2, c3 = st.columns(3)
     
-    # CSV Kayıt (Veritabanı Alternatifi)
+    # CSV Kayıt (Veritabanı alternatifi - Dosyayı indirip saklayabilirsin)
     csv = df.to_csv(index=False).encode('utf-8')
     c1.download_button("💾 Verileri Yedekle (CSV)", data=csv, file_name="portfoy_yedek.csv")
     
-    # PDF Raporu
-    pdf_bytes = create_pdf(df, total_tl, summary_data)
-    c2.download_button("📄 PDF Raporu İndir", data=pdf_bytes, file_name="zenith_rapor.pdf", mime="application/pdf")
+    # PDF Raporu (Hata giderilmiş versiyon)
+    try:
+        pdf_bytes = create_pdf(df, total_tl)
+        c2.download_button("📄 PDF Raporu İndir", data=pdf_bytes, file_name="zenith_rapor.pdf", mime="application/pdf")
+    except:
+        c2.error("PDF olusturulamadı.")
     
-    # Sağlık Skoru
-    c3.metric("Portföy Sağlık Skoru", "82/100", "Güçlü")
+    c3.metric("Portföy Sağlık Skoru", "82/100")
 
-    # Detaylı Tablo
-    st.subheader("📋 Fon Detayları")
-    st.table(df)
+    st.subheader("📋 Mevcut Fonlar")
+    st.dataframe(df, use_container_width=True)
 
 else:
-    st.info("Analiz için sol taraftan fon ekleyin.")
+    st.info("Lütfen sol panelden fon ekleyerek analizi baslatın.")
