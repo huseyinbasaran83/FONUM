@@ -5,7 +5,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: Hassas Analiz", layout="wide")
+st.set_page_config(page_title="Zenith Pro: Tam Yönetim & Analiz", layout="wide")
 
 # --- 1. VERİTABANI: FON İÇERİKLERİ ---
 fund_composition = {
@@ -33,8 +33,7 @@ def get_live_price(ticker):
         return float(data['Close'].iloc[-1]) if not data.empty else None
     except: return None
 
-# Güncel fiyatlarda da hassasiyeti korumak için 6 basamak formatı kullanılabilir
-live_fund_prices = {"AFT": 185.402134, "TCD": 12.805567, "MAC": 245.150000, "GUM": 0.451234, "TI3": 4.129876}
+live_fund_prices = {"AFT": 185.40, "TCD": 12.80, "MAC": 245.15, "GUM": 0.45, "TI3": 4.12}
 
 # --- 3. SESSION STATE ---
 if 'portfolio' not in st.session_state:
@@ -44,13 +43,12 @@ if 'portfolio' not in st.session_state:
 with st.sidebar:
     st.header("📥 Yeni Fon Girişi")
     f_code = st.text_input("Fon Kodu").upper()
-    f_qty = st.number_input("Adet", min_value=0.000001, value=1.0, format="%.6f")
-    # Hassasiyeti 6 basamağa çıkardık
-    f_cost = st.number_input("Alış Maliyeti (TL)", min_value=0.000001, value=0.000000, format="%.6f")
+    f_qty = st.number_input("Adet", min_value=0.1, value=1.0)
+    f_cost = st.number_input("Alış Maliyeti (TL)", min_value=0.01)
     f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=365))
     
     if st.button("➕ Portföye Ekle", use_container_width=True):
-        if f_code and f_cost > 0:
+        if f_code:
             with st.spinner("Veriler alınıyor..."):
                 u_old = get_historical_data("USDTRY=X", f_date)
                 g_ons_old = get_historical_data("GC=F", f_date)
@@ -63,31 +61,32 @@ with st.sidebar:
                     st.rerun()
 
 # --- 5. ANA EKRAN ---
-st.title("🛡️ Zenith Pro: Hassas Portföy Yönetimi")
+st.title("🛡️ Zenith Pro: 360° Akıllı Portföy")
 
 if st.session_state.portfolio:
     # --- YÖNETİM PANELİ ---
-    st.subheader("⚙️ Portföy Yönetimi (6 Basamak Hassasiyet)")
+    st.subheader("⚙️ Portföy Yönetimi (Adet, Maliyet ve Tarih Değiştir)")
     usd_now = get_live_price("USDTRY=X")
     gold_now = (get_live_price("GC=F") / 31.10) * usd_now if usd_now else 1
     
     for idx, item in enumerate(st.session_state.portfolio):
-        c_name, c_qty, c_cost, c_date, c_del = st.columns([1, 1, 1.2, 1.3, 0.5])
+        c_name, c_qty, c_cost, c_date, c_del = st.columns([1, 1, 1, 1.5, 0.5])
         
         with c_name:
             st.write(f"**{item['kod']}**")
         
         with c_qty:
-            st.session_state.portfolio[idx]['adet'] = st.number_input("Adet", value=float(item['adet']), key=f"q_{idx}", format="%.6f")
+            st.session_state.portfolio[idx]['adet'] = st.number_input("Adet", value=float(item['adet']), key=f"q_{idx}")
             
         with c_cost:
-            # Düzenleme alanında da 6 basamak hassasiyet aktif
-            st.session_state.portfolio[idx]['maliyet'] = st.number_input("Maliyet", value=float(item['maliyet']), key=f"m_{idx}", format="%.6f")
+            st.session_state.portfolio[idx]['maliyet'] = st.number_input("Maliyet", value=float(item['maliyet']), key=f"m_{idx}")
             
         with c_date:
+            # Tarih değiştirme özelliği eklendi
             new_date = st.date_input("Alış Tarihi", value=item['tarih'], key=f"d_{idx}")
             if new_date != item['tarih']:
-                with st.spinner("Kurlar güncelleniyor..."):
+                # Tarih değiştiyse kurları yeniden çek
+                with st.spinner("Yeni tarihin kurları çekiliyor..."):
                     u_old = get_historical_data("USDTRY=X", new_date)
                     g_ons_old = get_historical_data("GC=F", new_date)
                     if u_old and g_ons_old:
@@ -109,6 +108,7 @@ if st.session_state.portfolio:
     df['G. Değer'] = df['adet'] * df['Güncel Fiyat']
     df['T. Maliyet'] = df['adet'] * df['maliyet']
     
+    # Reel Getiri Hesaplama
     df['USD Fark %'] = ((df['G. Değer'] / usd_now) / (df['T. Maliyet'] / df['usd_maliyet']) - 1) * 100
     df['Altın Fark %'] = ((df['G. Değer'] / gold_now) / (df['T. Maliyet'] / df['gold_maliyet']) - 1) * 100
 
@@ -116,16 +116,12 @@ if st.session_state.portfolio:
     tab1, tab2 = st.tabs(["📈 Reel Performans", "💎 Varlık Röntgeni"])
 
     with tab1:
-        st.subheader("USD ve Altın Karşılaştırması")
-        # Tabloda maliyeti de 6 basamak gösterelim
-        st.dataframe(df[['kod', 'tarih', 'maliyet', 'USD Fark %', 'Altın Fark %']].style.format({
-            'maliyet': '{:.6f}'
-        }).background_gradient(cmap='RdYlGn', subset=['USD Fark %', 'Altın Fark %']), use_container_width=True)
-        
+        st.subheader("USD ve Altın Karşısındaki Durum")
+        st.dataframe(df[['kod', 'tarih', 'USD Fark %', 'Altın Fark %']].style.background_gradient(cmap='RdYlGn'), use_container_width=True)
         st.plotly_chart(px.bar(df, x='kod', y=['USD Fark %', 'Altın Fark %'], barmode='group'), use_container_width=True)
 
     with tab2:
-        st.subheader("Varlık Dağılım Röntgeni")
+        st.subheader("Portföy İçindeki Şirket ve Varlık Dağılımı")
         asset_map = {}
         for _, row in df.iterrows():
             comp = fund_composition.get(row['kod'], {"detay": {"DİĞER": 1.0}})['detay']
@@ -133,6 +129,7 @@ if st.session_state.portfolio:
                 asset_map[asset] = asset_map.get(asset, 0) + (row['G. Değer'] * ratio)
         
         breakdown_df = pd.DataFrame(list(asset_map.items()), columns=['Varlık', 'Değer']).sort_values(by='Değer', ascending=False)
+        
         col_pie, col_list = st.columns([1.5, 1])
         with col_pie:
             st.plotly_chart(px.pie(breakdown_df, values='Değer', names='Varlık', hole=0.4), use_container_width=True)
@@ -143,4 +140,4 @@ if st.session_state.portfolio:
     st.metric("Toplam Portföy Değeri", f"{df['G. Değer'].sum():,.2f} ₺")
 
 else:
-    st.info("İşlem girişi yapılmadı.")
+    st.info("Henüz fon eklenmemiş. Sol taraftan işlem girişi yapabilirsiniz.")
