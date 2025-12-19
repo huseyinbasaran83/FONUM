@@ -2,27 +2,33 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Sayfa Ayarları
 st.set_page_config(page_title="Zenith Portföy: Reel Getiri Agent", layout="wide")
 
 # --- CANLI & GEÇMİŞ VERİ MOTORU ---
-@st.cache_data
-def get_historical_data(ticker, date):
+@st.cache_data(ttl=3600)
+def get_historical_data(ticker, date_obj):
     try:
-        data = yf.download(ticker, start=date, end=date.replace(day=date.day+3 if date.day < 25 else date.day))
-        return data['Close'].iloc[0]
+        # Hafta sonuna denk gelirse diye 5 günlük veri çekip ilk günü alıyoruz
+        end_date = date_obj + timedelta(days=5)
+        data = yf.download(ticker, start=date_obj.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), progress=False)
+        if not data.empty:
+            return float(data['Close'].iloc[0])
+        return None
     except:
         return None
 
+@st.cache_data(ttl=600)
 def get_live_price(ticker):
     try:
-        return yf.Ticker(ticker).fast_info['last_price']
+        data = yf.download(ticker, period="1d", progress=False)
+        return float(data['Close'].iloc[-1])
     except:
         return None
 
-# Temsili Fon Fiyatları (Gerçek API yoksa buradan simüle edilir)
+# Temsili Fon Fiyatları (Not: Gerçek fon verileri için manuel giriş gerekebilir)
 live_fund_prices = {"AFT": 185.40, "TCD": 12.80, "MAC": 245.15, "GUM": 0.45, "TI3": 4.12}
 
 # --- Session State ---
@@ -33,64 +39,75 @@ if 'portfolio' not in st.session_state:
 with st.sidebar:
     st.header("📅 İşlem Kaydı")
     f_code = st.text_input("Fon Kodu").upper()
-    f_qty = st.number_input("Adet", min_value=1.0, value=100.0)
+    f_qty = st.number_input("Adet", min_value=0.1, value=100.0)
     f_cost = st.number_input("Birim Alış Maliyeti (TL)", min_value=0.0)
     f_date = st.date_input("Alış Tarihi", value=datetime(2023, 1, 1))
     
     if st.button("➕ İşlemi Analize Ekle", use_container_width=True):
-        with st.spinner("Geçmiş kurlar çekiliyor..."):
-            usd_old = get_historical_data("USDTRY=X", f_date)
-            gold_old = get_historical_data("GC=F", f_date) # Ons bazlı, TRY'ye çevrilecek
-            gbp_old = get_historical_data("GBPTRY=X", f_date)
-            
-            st.session_state.portfolio.append({
-                "kod": f_code, "adet": f_qty, "maliyet": f_cost, "tarih": f_date,
-                "usd_maliyet": usd_old, "gold_maliyet": gold_old, "gbp_maliyet": gbp_old
-            })
+        if f_code:
+            with st.spinner(f"{f_date} tarihindeki kurlar çekiliyor..."):
+                usd_old = get_historical_data("USDTRY=X", f_date)
+                gbp_old = get_historical_data("GBPTRY=X", f_date)
+                
+                # Altın için ONS/USD çekip o günkü kurla TL'ye çeviriyoruz (Yaklaşık Gram Altın)
+                gold_ons_old = get_historical_data("GC=F", f_date)
+                gold_old = (gold_ons_old / 31.10) * usd_old if usd_old and gold_ons_old else None
+                
+                st.session_state.portfolio.append({
+                    "kod": f_code, "adet": f_qty, "maliyet": f_cost, "tarih": f_date,
+                    "usd_maliyet": usd_old, "gold_maliyet": gold_old, "gbp_maliyet": gbp_old
+                })
+                st.rerun()
+
+    if st.session_state.portfolio and st.checkbox("⚠️ Listeyi Temizle"):
+        if st.button("🚨 TÜMÜNÜ SİL"):
+            st.session_state.portfolio = []
             st.rerun()
 
 # --- Ana Ekran ---
 st.title("⚖️ Zenith: Fırsat Maliyeti & Reel Getiri")
 
 if st.session_state.portfolio:
-    # Veri İşleme
     df = pd.DataFrame(st.session_state.portfolio)
     
-    # Güncel Verileri Çek
-    usd_now = get_live_price("USDTRY=X")
-    gbp_now = get_live_price("GBPTRY=X")
-    
-    df['Güncel Fiyat'] = df['kod'].map(live_fund_prices).fillna(df['maliyet'] * 1.2)
+    with st.spinner("Güncel piyasa verileri çekiliyor..."):
+        usd_now = get_live_price("USDTRY=X")
+        gbp_now = get_live_price("GBPTRY=X")
+        gold_ons_now = get_live_price("GC=F")
+        gold_now = (gold_ons_now / 31.10) * usd_now
+
+    df['Güncel Fiyat'] = df['kod'].map(live_fund_prices).fillna(df['maliyet'] * 1.1) # Bilinmeyen fonlar için %10 kâr varsayalım
     df['Toplam Maliyet'] = df['adet'] * df['maliyet']
     df['Güncel Değer'] = df['adet'] * df['Güncel Fiyat']
-    
-    # Kar-Zarar Hesapları
     df['Net Kar TL'] = df['Güncel Değer'] - df['Toplam Maliyet']
     
-    # REEL GETİRİ ANALİZİ (Dolar/Altın Karşılığı)
-    df['Dolar Bazlı Kar %'] = ((df['Güncel Değer'] / usd_now) / (df['Toplam Maliyet'] / df['usd_maliyet']) - 1) * 100
-    df['GBP Bazlı Kar %'] = ((df['Güncel Değer'] / gbp_now) / (df['Toplam Maliyet'] / df['gbp_maliyet']) - 1) * 100
+    # REEL GETİRİ ANALİZİ (Döviz Karşılığı)
+    # Formül: ((Güncel Değer / Güncel Kur) / (Maliyet Değeri / Eski Kur)) - 1
+    df['USD Bazlı Fark %'] = ((df['Güncel Değer'] / usd_now) / (df['Toplam Maliyet'] / df['usd_maliyet']) - 1) * 100
+    df['Altın Bazlı Fark %'] = ((df['Güncel Değer'] / gold_now) / (df['Toplam Maliyet'] / df['gold_maliyet']) - 1) * 100
 
     # Metrikler
     m1, m2, m3 = st.columns(3)
     m1.metric("Toplam Portföy", f"{df['Güncel Değer'].sum():,.2f} ₺")
-    m2.metric("USD Bazlı Reel Getiri", f"% {df['Dolar Bazlı Kar %'].mean():.2f}")
-    m3.metric("GBP Bazlı Reel Getiri", f"% {df['GBP Bazlı Kar %'].mean():.2f}")
+    m2.metric("USD Bazlı Ortalama Reel Fark", f"% {df['USD Bazlı Fark %'].mean():.2f}")
+    m3.metric("Altın Bazlı Ortalama Reel Fark", f"% {df['Altın Bazlı Fark %'].mean():.2f}")
 
     st.divider()
     
     # PERFORMANS TABLOSU
-    st.subheader("📊 Döviz Bazlı Performans Karşılaştırması")
-    st.write("*(Eksi değerler, fonun ilgili döviz biriminden daha az kazandırdığını gösterir)*")
+    st.subheader("📊 Döviz ve Altın Karşılaştırmalı Performans")
+    st.write("*(Pozitif Değer: Fon dövizi yendi | Negatif Değer: Dövizda kalsan daha iyiydi)*")
     
-    styled_df = df[['kod', 'tarih', 'Net Kar TL', 'Dolar Bazlı Kar %', 'GBP Bazlı Kar %']]
-    st.dataframe(styled_df.style.background_gradient(cmap='RdYlGn', subset=['Dolar Bazlı Kar %', 'GBP Bazlı Kar %']), use_container_width=True)
+    display_cols = ['kod', 'tarih', 'Net Kar TL', 'USD Bazlı Fark %', 'Altın Bazlı Fark %']
+    # Renklendirme için stil uygula
+    st.dataframe(df[display_cols].style.background_gradient(cmap='RdYlGn', subset=['USD Bazlı Fark %', 'Altın Bazlı Fark %']), use_container_width=True)
 
     # GÖRSELLEŞTİRME
-    st.subheader("🎯 Fon vs Döviz: Kim Daha Çok Kazandırdı?")
-    fig = px.bar(df, x='kod', y=['Dolar Bazlı Kar %', 'GBP Bazlı Kar %'], 
-                 barmode='group', title="Döviz Bazlı Görece Performans")
+    
+    st.subheader("🎯 Kim Daha Çok Kazandırdı?")
+    fig = px.bar(df, x='kod', y=['USD Bazlı Fark %', 'Altın Bazlı Fark %'], 
+                 barmode='group', labels={'value': 'Reel Fark (%)', 'variable': 'Kıyaslama Birimi'})
     st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("Analiz için fon kodu, adet, maliyet ve tarih giriniz. Sistem o günkü kurları otomatik bulacaktır.")
+    st.info("Sol taraftan fon kodunu ve alış tarihini girerek başlayın. Agent o günkü kurları otomatik çekip kıyaslayacaktır.")
