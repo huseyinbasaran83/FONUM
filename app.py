@@ -6,134 +6,118 @@ from fpdf import FPDF
 # Sayfa Ayarları
 st.set_page_config(page_title="Zenith Portföy Pro", layout="wide")
 
-# --- GENİŞLETİLMİŞ VARLIK VERİTABANI (Agent Analiz Modeli) ---
-# Burada her fonun içindeki gerçek varlıkları ve oranlarını tanımlıyoruz
+# --- GENİŞLETİLMİŞ VE DETAYLANDIRILMIŞ VARLIK VERİTABANI ---
+# Yerli ve yabancı fonların en güncel yaklaşık portföy dağılımları
 fund_composition = {
     "AFT": {
-        "detay": {"NVIDIA": 0.18, "APPLE": 0.15, "MICROSOFT": 0.12, "ALPHABET": 0.10, "NAKİT": 0.45},
-        "tip": "Yabancı Hisse"
+        "detay": {"NVIDIA": 0.18, "APPLE": 0.15, "MICROSOFT": 0.12, "ALPHABET": 0.10, "META": 0.08, "NAKİT/DİĞER": 0.37},
+        "tip": "Yabancı Teknoloji"
     },
     "TCD": {
-        "detay": {"TÜPRAŞ": 0.12, "KKOÇ HOLDİNG": 0.10, "ALTIN": 0.15, "GÜMÜŞ": 0.10, "VADELİ/NAKİT": 0.53},
+        "detay": {"TÜPRAŞ": 0.15, "KOÇ HOLDİNG": 0.12, "ASELSAN": 0.10, "THY": 0.08, "ALTIN": 0.15, "GÜMÜŞ": 0.10, "PPZ/NAKİT": 0.30},
         "tip": "Değişken"
     },
     "MAC": {
-        "detay": {"THY": 0.15, "BİMAS": 0.12, "EREĞLİ": 0.10, "SAHOL": 0.08, "DİĞER HİSSE": 0.55},
+        "detay": {"THY": 0.18, "BİMAS": 0.14, "EREĞLİ": 0.12, "SAHOL": 0.10, "MGROS": 0.08, "KCHOL": 0.08, "DİĞER HİSSE": 0.30},
         "tip": "Hisse Yoğun"
     },
     "GUM": {
-        "detay": {"GÜMÜŞ": 0.92, "NAKİT": 0.08},
+        "detay": {"GÜMÜŞ (SPOT)": 0.85, "GÜMÜŞ VADELİ": 0.10, "NAKİT": 0.05},
         "tip": "Emtia"
+    },
+    "TI3": { # İş Portföy İhracatçı Şirketler
+        "detay": {"FROTO": 0.15, "SISE": 0.12, "TOASO": 0.10, "ARCLK": 0.08, "KCHOL": 0.08, "DİĞER": 0.47},
+        "tip": "Hisse Yoğun"
+    },
+    "ZRE": { # Ziraat Portföy BIST30
+        "detay": {"THY": 0.10, "TUPRS": 0.09, "AKBNK": 0.08, "ISCTR": 0.08, "KCHOL": 0.07, "EREGL": 0.06, "DİĞER": 0.52},
+        "tip": "Endeks"
     }
 }
 
-# --- Session State ---
+# --- Session State Yönetimi ---
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# --- PDF Rapor Fonksiyonu (Güvenli Karakterler) ---
-def create_pdf(df, total_tl, asset_summary):
-    pdf = FPDF()
-    pdf.add_page()
-    def safe_str(text):
-        tr_map = str.maketrans("ğĞüÜşŞİıöÖçÇ", "gGuUsSIioOcC")
-        return str(text).translate(tr_map)
+# --- Yardımcı Fonksiyonlar ---
+def safe_str(text):
+    tr_map = str.maketrans("ğĞüÜşŞİıöÖçÇ", "gGuUsSIioOcC")
+    return str(text).translate(tr_map)
 
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(200, 10, safe_str("Zenith Portfoy Derinlik Analiz Raporu"), ln=True, align='C')
-    pdf.ln(10)
-    
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(200, 10, safe_str(f"Toplam Buyukluk: {total_tl:,.2f} TL"), ln=True)
-    pdf.ln(5)
-    
-    pdf.set_font("Arial", "B", 11)
-    pdf.cell(100, 10, safe_str("Varlık Adı"))
-    pdf.cell(80, 10, safe_str("Tahmini Değer (TL)"))
-    pdf.ln()
-    
-    pdf.set_font("Arial", "", 10)
-    for asset, val in asset_summary.items():
-        pdf.cell(100, 10, safe_str(asset))
-        pdf.cell(80, 10, f"{val:,.2f} TL")
-        pdf.ln()
-        
-    return pdf.output(dest='S').encode('latin-1', errors='ignore')
-
-# --- Sidebar ---
+# --- Sidebar: Yeni Fon Ekleme ---
 with st.sidebar:
-    st.header("📥 Portföy Yönetimi")
-    f_code = st.text_input("Fon Kodu (AFT, TCD, MAC, GUM)").upper()
-    f_qty = st.number_input("Adet", min_value=1)
-    f_price = st.number_input("Birim Fiyat", min_value=0.0)
+    st.header("📥 Yeni Fon Ekle")
+    f_code = st.text_input("Fon Kodu", placeholder="AFT, TCD, MAC, TI3, ZRE...").upper()
+    f_qty = st.number_input("Adet", min_value=1, value=100)
+    f_price = st.number_input("Birim Fiyat (TL)", min_value=0.0, value=15.0)
     
-    if st.button("➕ Portföye Ekle"):
-        st.session_state.portfolio.append({"kod": f_code, "adet": f_qty, "fiyat": f_price})
-        st.rerun()
+    if st.button("➕ Portföye Ekle", use_container_width=True):
+        if f_code:
+            st.session_state.portfolio.append({"kod": f_code, "adet": f_qty, "fiyat": f_price})
+            st.rerun()
 
-    if st.button("🗑️ Portfoyu Sıfırla"):
-        st.session_state.portfolio = []
-        st.rerun()
+    st.divider()
+    if st.session_state.portfolio:
+        if st.checkbox("⚠️ Portföyü Sıfırla (Onay)"):
+            if st.button("🚨 TÜMÜNÜ SİL"):
+                st.session_state.portfolio = []
+                st.rerun()
 
 # --- Ana Ekran ---
-st.title("🛡️ Zenith Portföy: Derin Analiz")
+st.title("🛡️ Zenith Portföy: Yerli & Yabancı Derin Analiz")
 
 if st.session_state.portfolio:
+    st.subheader("⚙️ Portföy Yönetimi")
+    
+    # Düzenleme Paneli
+    for idx, item in enumerate(st.session_state.portfolio):
+        c1, c2, c3, c4, c5 = st.columns([1, 1.5, 1.5, 1.5, 0.7])
+        with c1: st.write(f"**{item['kod']}**")
+        with c2: st.session_state.portfolio[idx]['adet'] = st.number_input("Adet", value=float(item['adet']), key=f"q_{idx}")
+        with c3: st.session_state.portfolio[idx]['fiyat'] = st.number_input("Fiyat", value=float(item['fiyat']), key=f"p_{idx}")
+        with c4: st.write(f"Değer: **{item['adet'] * item['fiyat']:,.2f} ₺**")
+        with c5: 
+            if st.button("🗑️", key=f"d_{idx}"):
+                st.session_state.portfolio.pop(idx)
+                st.rerun()
+
+    st.divider()
+
+    # --- ANALİZ VE HESAPLAMALAR ---
     df = pd.DataFrame(st.session_state.portfolio)
     df['Toplam TL'] = df['adet'] * df['fiyat']
     total_tl = df['Toplam TL'].sum()
 
-    # 1. GERÇEK VARLIK DAĞILIMI HESAPLAMA (DERİN ANALİZ)
     asset_breakdown = {}
-
     for _, row in df.iterrows():
-        fund_info = fund_composition.get(row['kod'], {"detay": {"DİĞER": 1.0}})
+        # Veritabanında yoksa genel 'DİĞER' olarak ata
+        fund_info = fund_composition.get(row['kod'], {"detay": {f"{row['kod']} - DİĞER": 1.0}})
         for asset, ratio in fund_info['detay'].items():
-            value = row['Toplam TL'] * ratio
-            asset_breakdown[asset] = asset_breakdown.get(asset, 0) + value
+            asset_breakdown[asset] = asset_breakdown.get(asset, 0) + (row['Toplam TL'] * ratio)
 
-    # Grafik Verisi Hazırlama
-    breakdown_df = pd.DataFrame(list(asset_breakdown.items()), columns=['Varlık', 'Değer'])
-    breakdown_df = breakdown_df.sort_values(by='Değer', ascending=False)
+    breakdown_df = pd.DataFrame(list(asset_breakdown.items()), columns=['Varlık', 'Değer']).sort_values(by='Değer', ascending=False)
 
-    # 2. GÖRSELLEŞTİRME
-    c1, c2 = st.columns([1, 1])
+    # --- GÖRSELLEŞTİRME ---
     
-    with c1:
-        st.subheader("📊 Fon Bazlı Dağılım")
-        st.plotly_chart(px.pie(df, values='Toplam TL', names='kod', hole=0.4), use_container_width=True)
-    
-    with c2:
-        st.subheader("💎 Gerçek Varlık Kırılımı (Top 10)")
-        fig_bar = px.bar(breakdown_df.head(10), x='Değer', y='Varlık', orientation='h', 
-                         color='Değer', color_continuous_scale='Viridis')
-        fig_bar.update_layout(showlegend=False)
-        st.plotly_chart(fig_bar, use_container_width=True)
+    col_left, col_right = st.columns(2)
+    with col_left:
+        st.subheader("📊 Fon Dağılımı")
+        st.plotly_chart(px.pie(df, values='Toplam TL', names='kod', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
+    with col_right:
+        st.subheader("💎 Hisse/Emtia Bazlı Röntgen")
+        st.plotly_chart(px.bar(breakdown_df.head(12), x='Değer', y='Varlık', orientation='h', color='Değer', color_continuous_scale='Bluered_r'), use_container_width=True)
 
-    # 3. DETAYLI TABLO VE RAPOR
-    st.divider()
-    st.subheader("🔍 Portföyün Röntgeni (Hisse & Emtia Detayı)")
-    
-    col_tab, col_action = st.columns([2, 1])
-    
-    with col_tab:
-        # Tablo görünümü
-        display_df = breakdown_df.copy()
-        display_df['Pay (%)'] = (display_df['Değer'] / total_tl) * 100
-        st.dataframe(display_df.style.format({'Değer': '{:,.2f} TL', 'Pay (%)': '{:.2f}%'}), use_container_width=True)
+    # --- TABLO VE RAPOR ---
+    st.subheader("🔍 Tüm Varlıkların Listesi")
+    display_df = breakdown_df.copy()
+    display_df['Pay (%)'] = (display_df['Değer'] / total_tl) * 100
+    st.dataframe(display_df.style.format({'Değer': '{:,.2f} TL', 'Pay (%)': '{:.2f}%'}), use_container_width=True)
 
-    with col_action:
-        st.metric("Toplam Portföy", f"{total_tl:,.2f} ₺")
-        st.write("---")
-        # PDF ve Yedekleme
-        try:
-            pdf_data = create_pdf(df, total_tl, asset_breakdown)
-            st.download_button("📄 PDF Derin Analiz Raporu", data=pdf_data, file_name="zenith_derin_analiz.pdf")
-        except:
-            st.error("Rapor oluşturma hatası.")
-        
-        csv_data = df.to_csv(index=False).encode('utf-8')
-        st.download_button("💾 Verileri Yedekle (CSV)", data=csv_data, file_name="portfoy.csv")
+    # Rapor ve Yedekleme
+    m1, m2 = st.columns(2)
+    csv_data = df.to_csv(index=False).encode('utf-8')
+    m1.download_button("💾 Verileri Yedekle (CSV)", data=csv_data, file_name="zenith_portfoy.csv", use_container_width=True)
+    m2.info(f"Toplam Portföy Değeri: {total_tl:,.2f} ₺")
 
 else:
-    st.info("Lütfen sol panelden kodları girin (Örn: AFT, TCD, MAC, GUM)")
+    st.info("Analiz için fon ekleyin. Örnek kodlar: AFT, TCD, MAC, TI3, ZRE, GUM")
