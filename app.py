@@ -5,19 +5,27 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: Kesin Hisse Analizi", layout="wide")
+st.set_page_config(page_title="Zenith Pro: TEFAS & KAP Entegrasyonu", layout="wide")
 
-# --- 1. FON İÇERİKLERİ (KODLARIN TAM EŞLEŞMESİ İÇİN) ---
+# --- 1. TEFAS FON LİSTESİ VE KAP İÇERİKLERİ ---
+# TEFAS'ta işlem gören popüler fonların listesi (Dropdown için)
+TEFAS_FUNDS = sorted([
+    "AFT", "TCD", "MAC", "TI3", "ZRE", "GMR", "IDH", "NNF", "HKH", "GL1", 
+    "OPB", "IPB", "GSP", "IUP", "ST1", "NRG", "FYL", "HVS", "EID", "GUB"
+])
+
+# KAP Beyanlarına Dayalı Yaklaşık Hisse Dağılımları
 fund_composition = {
-    "AFT": {"NVIDIA": 0.19, "APPLE": 0.16, "MICROSOFT": 0.14, "ALPHABET": 0.11, "META": 0.09, "NAKİT/DİĞER": 0.31},
     "TCD": {"TUPRS": 0.14, "KCHOL": 0.12, "ASELS": 0.11, "THYAO": 0.09, "BIMAS": 0.07, "ALTIN": 0.15, "DİĞER": 0.32},
     "MAC": {"THYAO": 0.16, "MGROS": 0.13, "EREGL": 0.11, "SAHOL": 0.10, "BIMAS": 0.09, "KCHOL": 0.08, "DİĞER": 0.33},
     "TI3": {"FROTO": 0.14, "SISE": 0.12, "TOASO": 0.11, "KCHOL": 0.10, "ARCLK": 0.08, "TUPRS": 0.07, "DİĞER": 0.38},
     "ZRE": {"THYAO": 0.12, "TUPRS": 0.11, "AKBNK": 0.10, "ISCTR": 0.10, "KCHOL": 0.09, "EREGL": 0.08, "DİĞER": 0.40},
-    "GMR": {"PGSUS": 0.13, "TAVHL": 0.11, "MGROS": 0.10, "YKBNK": 0.09, "BIMAS": 0.08, "DİĞER": 0.49}
+    "GMR": {"PGSUS": 0.13, "TAVHL": 0.11, "MGROS": 0.10, "YKBNK": 0.09, "BIMAS": 0.08, "DİĞER": 0.49},
+    "NNF": {"THYAO": 0.12, "PGSUS": 0.10, "TUPRS": 0.09, "KCHOL": 0.08, "BIMAS": 0.08, "DİĞER": 0.53},
+    "AFT": {"NVIDIA": 0.19, "APPLE": 0.16, "MICROSOFT": 0.14, "ALPHABET": 0.11, "META": 0.09, "NAKİT/DİĞER": 0.31}
 }
 
-# --- 2. VERİ ÇEKME MOTORU ---
+# --- 2. VERİ MOTORU ---
 @st.cache_data(ttl=3600)
 def get_historical_data(ticker, date_obj):
     try:
@@ -34,40 +42,39 @@ def get_live_price(ticker):
         return float(data['Close'].iloc[-1]) if not data.empty else None
     except: return None
 
-# Temsili Güncel Fiyatlar
-live_fund_prices = {"AFT": 185.40, "TCD": 12.80, "MAC": 245.15, "GMR": 18.20, "TI3": 4.12, "ZRE": 115.30}
+live_fund_prices = {"AFT": 185.40, "TCD": 12.80, "MAC": 245.15, "TI3": 4.12, "ZRE": 115.30, "GMR": 18.20, "NNF": 10.45}
 
 # --- 3. SESSION STATE ---
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# --- 4. SIDEBAR: GİRİŞ ---
+# --- 4. SIDEBAR: SEÇİM KUTUSU ---
 with st.sidebar:
-    st.header("📥 Yeni Fon Girişi")
-    f_code = st.text_input("Fon Kodu").upper().strip() # Boşlukları temizler
+    st.header("📥 İşlem Girişi")
+    # BURADA SELECTBOX KULLANDIK: Elle yazma hatası bitti
+    f_code = st.selectbox("Fon Seçin (TEFAS Listesi)", TEFAS_FUNDS)
     f_qty = st.number_input("Adet", min_value=0.000001, value=1.0)
     f_cost = st.number_input("Birim Alış Maliyeti (TL)", min_value=0.000001, format="%.6f")
     f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=365))
     
-    if st.button("➕ Portföye Ekle", use_container_width=True):
-        if f_code and f_cost > 0:
-            with st.spinner("Kurlar alınıyor..."):
-                u_old = get_historical_data("USDTRY=X", f_date)
-                g_ons_old = get_historical_data("GC=F", f_date)
-                if u_old and g_ons_old:
-                    st.session_state.portfolio.append({
-                        "kod": f_code, "adet": f_qty, "maliyet": f_cost, "tarih": f_date,
-                        "usd_maliyet": u_old, "gold_maliyet": (g_ons_old / 31.10) * u_old
-                    })
-                    st.rerun()
+    if st.button("➕ Analize Ekle", use_container_width=True):
+        with st.spinner("Kurlar alınıyor..."):
+            u_old = get_historical_data("USDTRY=X", f_date)
+            g_ons_old = get_historical_data("GC=F", f_date)
+            if u_old and g_ons_old:
+                st.session_state.portfolio.append({
+                    "kod": f_code, "adet": f_qty, "maliyet": f_cost, "tarih": f_date,
+                    "usd_maliyet": u_old, "gold_maliyet": (g_ons_old / 31.10) * u_old
+                })
+                st.rerun()
 
 # --- 5. ANA EKRAN ---
-st.title("🛡️ Zenith Pro: Kesin Hisse Dağılım Raporu")
+st.title("🛡️ Zenith Pro: TEFAS Bazlı Varlık Analizi")
 
 if st.session_state.portfolio:
     # --- YÖNETİM PANELİ ---
     st.subheader("⚙️ Portföy Yönetimi")
-    usd_now = get_live_price("USDTRY=X") or 34.0
+    usd_now = get_live_price("USDTRY=X") or 35.0
     gold_now = ((get_live_price("GC=F") or 2600.0) / 31.10) * usd_now
     
     for idx, item in enumerate(st.session_state.portfolio):
@@ -89,7 +96,7 @@ if st.session_state.portfolio:
     df['G. Değer'] = df['adet'] * df['G. Fiyat']
     df['T. Maliyet'] = df['adet'] * df['maliyet']
     
-    tab1, tab2 = st.tabs(["📈 Reel Getiri Analizi", "💎 Hisse Senedi Dağılım Raporu"])
+    tab1, tab2 = st.tabs(["📈 Reel Getiri Analizi", "💎 KAP: Hisse Dağılım Röntgeni"])
 
     with tab1:
         df['USD Fark %'] = ((df['G. Değer']/usd_now)/(df['T. Maliyet']/df['usd_maliyet'])-1)*100
@@ -97,19 +104,12 @@ if st.session_state.portfolio:
         st.dataframe(df[['kod', 'tarih', 'maliyet', 'USD Fark %', 'Altın Fark %']].style.format({'maliyet': '{:.6f}'}).background_gradient(cmap='RdYlGn'), use_container_width=True)
 
     with tab2:
-        st.subheader("Hisse Senedi ve Varlık Detayları")
+        st.subheader("Hisse Senedi Bazlı Portföy Dağılımı")
         hisse_data = []
-        
         for _, row in df.iterrows():
-            # Fon kodunu bulamazsa fonun kendisini %100 hisseymiş gibi listeye ekler
-            target_fund = row['kod'].strip().upper()
-            comp = fund_composition.get(target_fund, {f"{target_fund} (Diğer/Bilinmeyen)": 1.0})
-            
+            comp = fund_composition.get(row['kod'], {f"{row['kod']} (Genel)": 1.0})
             for asset, ratio in comp.items():
-                hisse_data.append({
-                    "Hisse/Varlık": asset,
-                    "TL Değeri": row['G. Değer'] * ratio
-                })
+                hisse_data.append({"Hisse/Varlık": asset, "TL Değeri": row['G. Değer'] * ratio})
         
         final_hisse_df = pd.DataFrame(hisse_data).groupby("Hisse/Varlık").sum().reset_index().sort_values(by="TL Değeri", ascending=False)
         final_hisse_df["Yüzde (%)"] = (final_hisse_df["TL Değeri"] / final_hisse_df["TL Değeri"].sum()) * 100
@@ -118,7 +118,7 @@ if st.session_state.portfolio:
 
         c_pie, c_table = st.columns([1.5, 1])
         with c_pie:
-            st.plotly_chart(px.pie(final_hisse_df, values='TL Değeri', names='Hisse/Varlık', hole=0.4, title="Toplam Portföy Dağılımı"), use_container_width=True)
+            st.plotly_chart(px.pie(final_hisse_df, values='TL Değeri', names='Hisse/Varlık', hole=0.4), use_container_width=True)
         with c_table:
             st.write("**Detaylı Liste**")
             st.dataframe(final_hisse_df.style.format({'TL Değeri': '{:,.2f} ₺', 'Yüzde (%)': '% {:.2f}'}), use_container_width=True)
@@ -126,4 +126,4 @@ if st.session_state.portfolio:
     st.divider()
     st.metric("Toplam Portföy", f"{df['G. Değer'].sum():,.2f} ₺")
 else:
-    st.info("Portföyünüz boş. Lütfen fon ekleyin.")
+    st.info("İşlem yapmak için sol taraftaki listeden fon seçiniz.")
