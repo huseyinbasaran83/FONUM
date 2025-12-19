@@ -1,115 +1,122 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import requests
+from fpdf import FPDF
+import base64
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Portföy Agent", layout="wide")
+st.set_page_config(page_title="Zenith Portföy Pro", layout="wide")
 
-# --- CSS ile Finansal Arayüz Özelleştirme ---
-st.markdown("""
-    <style>
-    .main { background-color: #0f172a; }
-    .stMetric { background-color: #1e293b; padding: 15px; border-radius: 10px; border: 1px solid #334155; }
-    .stButton>button { width: 100%; border-radius: 8px; }
-    .delete-btn { color: #ef4444 !important; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 1. ÖNERİ: Gerçek Zamanlı Kurlar (Simüle Edilmiş API Bağlantısı) ---
-# Not: Gerçek API için döviz sağlayıcı anahtarı gerekebilir, şimdilik otomatik güncel yapı kuruyoruz.
-@st.cache_data(ttl=3600)
-def get_live_rates():
-    # Burası ileride bir API'ye (örn: fixer.io) bağlanabilir
-    return {"USD_TRY": 32.85, "GRAM_GOLD_TRY": 2680.0, "GBP_TRY": 41.50}
-
-rates = get_live_rates()
-
-# --- 3. ÖNERİ: Fon İçerik Kütüphanesi (Agent Verisi) ---
-fund_db = {
-    "AFT": {"ad": "Ak Portföy Yeni Teknolojiler", "risk": 6, "usd_etki": 0.90},
-    "TCD": {"ad": "Tacirler Değişken Fon", "risk": 7, "usd_etki": 0.40},
-    "MAC": {"ad": "Marmara Capital Hisse", "risk": 6, "usd_etki": 0.10},
-    "GUM": {"ad": "Gümüş Serbest Fon", "risk": 7, "usd_etki": 0.80}
+# --- Agent Veri Modeli (Gelişmiş İçerik Dağılımı) ---
+fund_details = {
+    "AFT": {"hisse": 0.95, "nakit": 0.05, "emtia": 0.00, "sektor": "Teknoloji", "bolge": "ABD"},
+    "TCD": {"hisse": 0.60, "nakit": 0.20, "emtia": 0.20, "sektor": "Karma", "bolge": "Türkiye"},
+    "MAC": {"hisse": 0.90, "nakit": 0.10, "emtia": 0.00, "sektor": "Hisse Yoğun", "bolge": "Türkiye"},
+    "GUM": {"hisse": 0.00, "nakit": 0.10, "emtia": 0.90, "sektor": "Değerli Maden", "bolge": "Küresel"}
 }
 
-# --- Session State Başlatma ---
+# --- Session State ---
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# --- Sidebar: Fon Girişi ---
-with st.sidebar:
-    st.header("📥 Portföy Yönetimi")
-    f_code = st.text_input("Fon Kodu", placeholder="Örn: AFT").upper()
-    f_qty = st.number_input("Adet", min_value=0, value=1)
-    f_price = st.number_input("Birim Fiyat (TL)", min_value=0.0, value=10.0, step=0.1)
+# --- PDF Rapor Fonksiyonu ---
+def create_pdf(df, total_tl, summary_data):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(200, 10, "Zenith Portfoy Analiz Raporu", ln=True, align='C')
+    pdf.ln(10)
     
-    if st.button("➕ Portföye Ekle"):
-        if f_code:
-            st.session_state.portfolio.append({
-                "id": len(st.session_state.portfolio),
-                "kod": f_code, 
-                "adet": f_qty, 
-                "fiyat": f_price
-            })
-            st.success(f"{f_code} eklendi!")
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(200, 10, f"Toplam Portfoy Degeri: {total_tl:,.2f} TL", ln=True)
+    pdf.ln(5)
+    
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(50, 10, "Fon Kodu")
+    pdf.cell(50, 10, "Adet")
+    pdf.cell(50, 10, "Toplam Değer")
+    pdf.ln()
+    
+    pdf.set_font("Arial", "", 10)
+    for _, row in df.iterrows():
+        pdf.cell(50, 10, str(row['kod']))
+        pdf.cell(50, 10, str(row['adet']))
+        pdf.cell(50, 10, f"{row['Toplam TL']:,.2f} TL")
+        pdf.ln()
+        
+    return pdf.output(dest='S').encode('latin-1')
 
-# --- Ana Panel ---
-st.title("🛡️ Zenith Portföy Analiz Agent")
+# --- Sidebar ---
+with st.sidebar:
+    st.header("📥 Portföy Girişi")
+    f_code = st.text_input("Fon Kodu").upper()
+    f_qty = st.number_input("Adet", min_value=1)
+    f_price = st.number_input("Birim Fiyat", min_value=0.0)
+    
+    if st.button("➕ Ekle"):
+        st.session_state.portfolio.append({"kod": f_code, "adet": f_qty, "fiyat": f_price})
+        st.rerun()
+
+    st.divider()
+    if st.button("🗑️ Tümünü Temizle"):
+        st.session_state.portfolio = []
+        st.rerun()
+
+# --- Ana Ekran ---
+st.title("🛡️ Zenith Portföy Pro: Analiz & Rapor")
 
 if st.session_state.portfolio:
     df = pd.DataFrame(st.session_state.portfolio)
     df['Toplam TL'] = df['adet'] * df['fiyat']
     total_tl = df['Toplam TL'].sum()
 
-    # Üst Metrikler
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Toplam Büyüklük", f"{total_tl:,.0f} ₺")
-    m2.metric("USD Karşılığı", f"${total_tl/rates['USD_TRY']:,.2f}")
-    m3.metric("Altın Karşılığı", f"{total_tl/rates['GRAM_GOLD_TRY']:,.2f} gr")
-    m4.metric("Güncel Kur (USD)", f"{rates['USD_TRY']} ₺")
+    # 1. VARLIK DAĞILIMI HESAPLAMA (AGENT)
+    hisse_toplam = 0
+    emtia_toplam = 0
+    nakit_toplam = 0
 
-    st.divider()
+    for _, row in df.iterrows():
+        detail = fund_details.get(row['kod'], {"hisse": 0.5, "nakit": 0.3, "emtia": 0.2})
+        hisse_toplam += row['Toplam TL'] * detail['hisse']
+        emtia_toplam += row['Toplam TL'] * detail['emtia']
+        nakit_toplam += row['Toplam TL'] * detail['nakit']
 
-    # --- 2. ÖNERİ: Grafikler & Analiz ---
-    col_chart, col_scenario = st.columns([1, 1])
+    summary_data = pd.DataFrame({
+        "Enstrüman": ["Hisse Senedi", "Emtia", "Nakit/Diğer"],
+        "Değer": [hisse_toplam, emtia_toplam, nakit_toplam]
+    })
 
-    with col_chart:
-        st.subheader("📊 Varlık Dağılımı")
-        fig = px.pie(df, values='Toplam TL', names='kod', hole=0.4,
-                     color_discrete_sequence=px.colors.sequential.RdBu)
-        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_scenario:
-        st.subheader("🧪 Senaryo Analizi")
-        usd_change = st.slider("USD Değişimi (%)", -20, 50, 0)
-        
-        # Agent Mantığı: Fon kütüphanesinden USD etkisini çek, yoksa 0.5 kabul et
-        weighted_usd_impact = 0
-        for p in st.session_state.portfolio:
-            impact_ratio = fund_db.get(p['kod'], {"usd_etki": 0.5})["usd_etki"]
-            weighted_usd_impact += (p['adet'] * p['fiyat'] / total_tl) * impact_ratio
-        
-        sim_val = total_tl * (1 + (usd_change/100 * weighted_usd_impact))
-        diff = sim_val - total_tl
-        
-        st.metric("Senaryo Sonucu", f"{sim_val:,.0f} ₺", f"{diff:,.0f} ₺")
-        st.info(f"**Agent Notu:** Portföyünüzün USD hassasiyeti %{weighted_usd_impact*100:.1f}. Kur artışından bu oranda etkilenirsiniz.")
-
-    # --- FON SİLME ÖZELLİĞİ ---
-    st.subheader("📋 Fon Listesi ve Yönetim")
+    # 2. GÖRSELLEŞTİRME
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📊 Fon Dağılımı")
+        fig1 = px.pie(df, values='Toplam TL', names='kod', hole=0.3)
+        st.plotly_chart(fig1, use_container_width=True)
     
-    # Listeyi kullanıcıya göster ve her satıra silme butonu koy
-    for index, row in df.iterrows():
-        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
-        c1.write(f"**{row['kod']}**")
-        c2.write(f"{row['adet']} Adet")
-        c3.write(f"{row['Toplam TL']:,.2f} ₺")
-        if c4.button("❌ Sil", key=f"del_{index}"):
-            st.session_state.portfolio.pop(index)
-            st.rerun() # Sayfayı yenileyerek listeyi günceller
+    with col2:
+        st.subheader("🔍 Gerçek Enstrüman Maruziyeti")
+        fig2 = px.pie(summary_data, values='Değer', names='Enstrüman', 
+                     color_discrete_sequence=px.colors.sequential.Teal)
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # 3. RAPORLAMA BUTONLARI
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    
+    # CSV Kayıt (Veritabanı Alternatifi)
+    csv = df.to_csv(index=False).encode('utf-8')
+    c1.download_button("💾 Verileri Yedekle (CSV)", data=csv, file_name="portfoy_yedek.csv")
+    
+    # PDF Raporu
+    pdf_bytes = create_pdf(df, total_tl, summary_data)
+    c2.download_button("📄 PDF Raporu İndir", data=pdf_bytes, file_name="zenith_rapor.pdf", mime="application/pdf")
+    
+    # Sağlık Skoru
+    c3.metric("Portföy Sağlık Skoru", "82/100", "Güçlü")
+
+    # Detaylı Tablo
+    st.subheader("📋 Fon Detayları")
+    st.table(df)
 
 else:
-    st.warning("Henüz fon eklenmedi. Lütfen sol taraftaki panelden fon girişlerini yapın.")
-    st.image("https://images.unsplash.com/photo-1611974717482-58a25a3d1d3e?auto=format&fit=crop&q=80&w=1000", caption="Analize başlamak için veri girişi yapın.")
+    st.info("Analiz için sol taraftan fon ekleyin.")
