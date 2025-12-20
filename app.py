@@ -6,12 +6,11 @@ import json
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: Hızlı Portföy", layout="wide")
+st.set_page_config(page_title="Zenith Pro: Kesintisiz Analiz", layout="wide")
 
-# --- 1. HIZLANDIRILMIŞ VERİ MOTORU ---
+# --- 1. VERİ MOTORU ---
 @st.cache_data(ttl=3600)
 def get_kur_data(ticker, date_str):
-    """Tarihi string alarak cache mekanizmasını stabilize ediyoruz"""
     try:
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
         data = yf.download(ticker, start=date_obj.strftime('%Y-%m-%d'), 
@@ -33,7 +32,6 @@ def get_live_price(ticker):
 def get_inflation_factor(start_date):
     if isinstance(start_date, str):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
-    # Tarih farkını ay bazında hesapla
     today = datetime.now()
     months_diff = (today.year - start_date.year) * 12 + (today.month - start_date.month)
     return (1 + 0.042) ** max(0, months_diff)
@@ -42,27 +40,25 @@ def get_inflation_factor(start_date):
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# --- 3. SIDEBAR: YÜKLEME VE GİRİŞ ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.header("💾 Veri Yönetimi")
     
-    uploaded_json = st.file_uploader("📂 Yedek Dosyasını Seç", type=['json'])
+    uploaded_json = st.file_uploader("📂 Yedek Dosyasını Yükle", type=['json'])
     if uploaded_json:
         try:
             raw_data = json.load(uploaded_json)
-            # Kritik düzeltme: Yüklenen veriyi temizle ve date objesine çevir
             cleaned_data = []
             for item in raw_data:
                 if 'tarih' in item and isinstance(item['tarih'], str):
                     item['tarih'] = datetime.strptime(item['tarih'], '%Y-%m-%d').date()
                 cleaned_data.append(item)
             st.session_state.portfolio = cleaned_data
-            st.success("Yükleme tamamlandı!")
+            st.success("Yükleme Başarılı!")
         except Exception as e:
-            st.error(f"Yükleme hatası: {e}")
+            st.error(f"Hata: {e}")
 
     if st.session_state.portfolio:
-        # JSON İndirme Hazırlığı
         export_data = []
         for item in st.session_state.portfolio:
             new_item = item.copy()
@@ -70,7 +66,7 @@ with st.sidebar:
                 new_item['tarih'] = new_item['tarih'].strftime('%Y-%m-%d')
             export_data.append(new_item)
         
-        st.download_button("📥 Mevcut Portföyü İndir", 
+        st.download_button("📥 Portföyü Yedekle", 
                            data=json.dumps(export_data),
                            file_name=f"portfoy_yedek.json",
                            use_container_width=True)
@@ -85,7 +81,7 @@ with st.sidebar:
     if st.button("➕ Listeye Ekle", use_container_width=True):
         if f_code and f_qty > 0:
             d_str = f_date.strftime('%Y-%m-%d')
-            with st.spinner("Kurlar çekiliyor..."):
+            with st.spinner("Piyasa verileri alınıyor..."):
                 u_o = get_kur_data("USDTRY=X", d_str)
                 g_o = get_kur_data("GBPTRY=X", d_str)
                 gold_o = (get_kur_data("GC=F", d_str) / 31.10) * u_o
@@ -101,14 +97,12 @@ with st.sidebar:
 st.title("🛡️ Zenith Pro: Kesintisiz Analiz")
 
 if st.session_state.portfolio:
-    # 1. DÜZENLEME PANELİ
     with st.expander("⚙️ Portföy Listesi ve Düzenleme", expanded=True):
         to_del = None
         for i, item in enumerate(st.session_state.portfolio):
             c = st.columns([1, 1.2, 1, 1, 1, 0.5])
             with c[0]: st.info(f"**{item['kod']}**")
             with c[1]: 
-                # Tarih gösterimi hatasını engelle
                 d_val = item['tarih']
                 st.write(d_val.strftime('%d.%m.%Y') if hasattr(d_val, 'strftime') else str(d_val))
             with c[2]: st.session_state.portfolio[i]['adet'] = c[2].number_input("Adet", value=float(item['adet']), key=f"q_{i}", label_visibility="collapsed")
@@ -120,8 +114,7 @@ if st.session_state.portfolio:
             st.session_state.portfolio.pop(to_del)
             st.rerun()
 
-    # 2. HESAPLAMALAR
-    with st.spinner("Piyasa verileri güncelleniyor..."):
+    with st.spinner("Güncel kurlar işleniyor..."):
         u_n = get_live_price("USDTRY=X")
         g_n = get_live_price("GBPTRY=X")
         gold_n = (get_live_price("GC=F") / 31.10) * u_n
@@ -132,19 +125,19 @@ if st.session_state.portfolio:
             t_gun = item['adet'] * item['guncel']
             inf = get_inflation_factor(item['tarih'])
             
+            # Hatalı değişkenler düzeltildi
             final_rows.append({
                 "Fon": item['kod'],
                 "Alış Tutarı": t_mal,
                 "Güncel Değer": t_gun,
                 "Enflasyon Farkı (₺)": t_gun - (t_mal * inf),
                 "Dolar Farkı ($)": (t_gun / u_n) - (t_mal / item['usd_old']),
-                "Sterlin Farkı (£)": (t_gun / g_n) - (tm / item['gbp_old']) if 'tm' not in locals() else (t_gun / g_n) - (t_mal / item['gbp_old']),
+                "Sterlin Farkı (£)": (t_gun / g_n) - (t_mal / item['gbp_old']),
                 "Altın Farkı (gr)": (t_gun / gold_n) - (t_mal / item['gold_old'])
             })
         
         df = pd.DataFrame(final_rows)
 
-    # 3. GÖRÜNÜM
     st.subheader("📋 Reel Performans Tablosu")
     st.dataframe(df.style.format({
         "Alış Tutarı": "{:,.2f} ₺", "Güncel Değer": "{:,.2f} ₺",
@@ -153,7 +146,6 @@ if st.session_state.portfolio:
     }).applymap(lambda x: 'color: #00FF00' if (isinstance(x, (int, float)) and x > 0) else 'color: #FF4B4B', 
                 subset=df.columns[3:]), use_container_width=True)
 
-    # 4. ÖZET
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Ana Sermaye", f"{df['Alış Tutarı'].sum():,.2f} ₺")
