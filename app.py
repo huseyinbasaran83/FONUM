@@ -5,7 +5,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: TEFAS Senkron", layout="wide")
+st.set_page_config(page_title="Zenith Pro: TEFAS Akıllı Eşleşme", layout="wide")
 
 # --- 1. KAP VERİTABANI ---
 KAP_DATA = {
@@ -24,136 +24,127 @@ def get_hist_kur(ticker, date_obj):
     try:
         data = yf.download(ticker, start=date_obj.strftime('%Y-%m-%d'), end=(date_obj + timedelta(days=7)).strftime('%Y-%m-%d'), progress=False)
         return float(data['Close'].iloc[0]) if not data.empty else 1.0
-    except:
-        return 1.0
+    except: return 1.0
 
 @st.cache_data(ttl=600)
 def get_current_kur(ticker):
     try:
         data = yf.download(ticker, period="1d", progress=False)
         return float(data['Close'].iloc[-1]) if not data.empty else 1.0
-    except:
-        return 1.0
+    except: return 1.0
 
 # --- 3. SESSION STATE ---
-if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = []
-if 'tefas_db' not in st.session_state:
-    st.session_state.tefas_db = {}
+if 'portfolio' not in st.session_state: st.session_state.portfolio = []
+if 'tefas_db' not in st.session_state: st.session_state.tefas_db = {}
 
-# --- 4. SIDEBAR: DOSYA YÜKLEME VE GİRİŞ ---
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("📂 TEFAS Veri Merkezi")
-    uploaded_file = st.file_uploader("Fiyat Listesi Yükle (Excel/CSV)", type=['xlsx', 'csv'])
+    uploaded_file = st.file_uploader("TEFAS Excel/CSV Yükle", type=['xlsx', 'csv'])
     
     if uploaded_file:
         try:
-            if uploaded_file.name.endswith('.csv'):
-                tefas_df = pd.read_csv(uploaded_file)
-            else:
-                tefas_df = pd.read_excel(uploaded_file)
+            df_tefas = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
             
-            tefas_df.columns = [str(c).strip().upper() for c in tefas_df.columns]
-            for _, row in tefas_df.iterrows():
-                kod = str(row.iloc[0]).strip().upper()
-                fiyat = float(row.iloc[1])
-                st.session_state.tefas_db[kod] = fiyat
-            st.success(f"✅ {len(tefas_df)} fon fiyatı tanımlandı.")
+            # Sütun isimlerini temizle
+            df_tefas.columns = [str(c).strip().upper() for c in df_tefas.columns]
+            
+            # Akıllı Sütun Bulucu
+            kod_col = next((c for c in df_tefas.columns if "KOD" in c), df_tefas.columns[0])
+            fiyat_keywords = ["FİYAT", "SON", "DEĞER", "PRICE", "BİRİM"]
+            fiyat_col = next((c for c in df_tefas.columns if any(k in c for k in fiyat_keywords)), None)
+            
+            if fiyat_col:
+                for _, row in df_tefas.iterrows():
+                    try:
+                        f_kod = str(row[kod_col]).strip().upper()
+                        f_fiyat = float(row[fiyat_col])
+                        st.session_state.tefas_db[f_kod] = f_fiyat
+                    except: continue
+                st.success(f"✅ {len(st.session_state.tefas_db)} fon güncellendi.")
+            else:
+                st.error("Fiyat sütunu bulunamadı!")
         except Exception as e:
-            st.error(f"⚠️ Dosya hatası: {e}")
+            st.error(f"Hata: {e}")
 
     st.divider()
     st.header("➕ Fon Ekle")
     f_code = st.text_input("Fon Kodu").upper().strip()
     f_qty = st.number_input("Adet", min_value=0.0, format="%.6f")
-    f_cost = st.number_input("Birim Maliyet (TL)", min_value=0.0, format="%.6f")
+    f_cost = st.number_input("Maliyet (TL)", min_value=0.0, format="%.6f")
     f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=30))
     
-    if st.button("Portföye Kaydet", use_container_width=True):
+    if st.button("Kaydet", use_container_width=True):
         if f_code and f_qty > 0:
             u_old = get_hist_kur("USDTRY=X", f_date)
             g_old = get_hist_kur("GC=F", f_date)
-            live_val = st.session_state.tefas_db.get(f_code, f_cost)
+            live = st.session_state.tefas_db.get(f_code, f_cost)
             st.session_state.portfolio.append({
                 "kod": f_code, "adet": f_qty, "maliyet": f_cost, 
-                "guncel_fiyat": live_val, "tarih": f_date, 
+                "guncel_fiyat": live, "tarih": f_date, 
                 "u_maliyet": u_old, "g_maliyet": (g_old/31.10)*u_old
             })
             st.rerun()
 
 # --- 5. ANA EKRAN ---
-st.title("🛡️ Zenith Pro: Akıllı Portföy Yönetimi")
+st.title("🛡️ Zenith Pro: Otomatik Senkron")
 
 if st.session_state.portfolio:
-    if st.session_state.tefas_db:
-        if st.button("🔄 Tüm Portföyü Güncel Excel Verileriyle Senkronize Et", use_container_width=True):
-            for i, item in enumerate(st.session_state.portfolio):
-                if item['kod'] in st.session_state.tefas_db:
-                    st.session_state.portfolio[i]['guncel_fiyat'] = st.session_state.tefas_db[item['kod']]
-            st.toast("Fiyatlar güncellendi!")
+    if st.session_state.tefas_db and st.button("🔄 Excel Fiyatlarını Portföye Uygula", use_container_width=True):
+        for i, item in enumerate(st.session_state.portfolio):
+            if item['kod'] in st.session_state.tefas_db:
+                st.session_state.portfolio[i]['guncel_fiyat'] = st.session_state.tefas_db[item['kod']]
+        st.toast("Portföy güncellendi!")
 
-    st.subheader("⚙️ Portföy Yönetimi")
     u_now = get_current_kur("USDTRY=X")
     g_now = (get_current_kur("GC=F") / 31.10) * u_now
 
-    # Tablo Başlıkları
-    h_cols = st.columns([0.8, 1, 1.2, 1.2, 1.2, 0.4])
-    h_labels = ["Fon", "Adet", "Maliyet", "Güncel Fiyat", "Tarih", "Sil"]
-    for col, label in zip(h_cols, h_labels):
-        col.write(f"**{label}**")
+    # Yönetim Tablosu
+    h = st.columns([0.8, 1, 1.2, 1.2, 1.2, 0.4])
+    cols = ["Fon", "Adet", "Maliyet", "Güncel", "Tarih", "Sil"]
+    for i, head in enumerate(cols): h[i].write(f"**{head}**")
 
-    # Satır Verileri
     for idx, item in enumerate(st.session_state.portfolio):
-        c1, c2, c3, c4, c5, c6 = st.columns([0.8, 1, 1.2, 1.2, 1.2, 0.4])
-        with c1: st.write(f"**{item['kod']}**")
-        with c2: st.session_state.portfolio[idx]['adet'] = c2.number_input("", value=float(item['adet']), key=f"q_{idx}", format="%.6f", label_visibility="collapsed")
-        with c3: st.session_state.portfolio[idx]['maliyet'] = c3.number_input("", value=float(item['maliyet']), key=f"m_{idx}", format="%.6f", label_visibility="collapsed")
-        with c4: st.session_state.portfolio[idx]['guncel_fiyat'] = c4.number_input("", value=float(item.get('guncel_fiyat', item['maliyet'])), key=f"g_{idx}", format="%.6f", label_visibility="collapsed")
-        with c5: st.session_state.portfolio[idx]['tarih'] = c5.date_input("", value=item['tarih'], key=f"d_{idx}", label_visibility="collapsed")
-        with c6: 
-            if c6.button("🗑️", key=f"del_{idx}"):
-                st.session_state.portfolio.pop(idx)
-                st.rerun()
+        c = st.columns([0.8, 1, 1.2, 1.2, 1.2, 0.4])
+        with c[0]: st.write(item['kod'])
+        with c[1]: st.session_state.portfolio[idx]['adet'] = c[1].number_input("", value=float(item['adet']), key=f"q_{idx}", format="%.6f", label_visibility="collapsed")
+        with c[2]: st.session_state.portfolio[idx]['maliyet'] = c[2].number_input("", value=float(item['maliyet']), key=f"m_{idx}", format="%.6f", label_visibility="collapsed")
+        with c[3]: st.session_state.portfolio[idx]['guncel_fiyat'] = c[3].number_input("", value=float(item.get('guncel_fiyat', item['maliyet'])), key=f"g_{idx}", format="%.6f", label_visibility="collapsed")
+        with c[4]: st.session_state.portfolio[idx]['tarih'] = c[4].date_input("", value=item['tarih'], key=f"d_{idx}", label_visibility="collapsed")
+        with c[5]: 
+            if c[5].button("🗑️", key=f"del_{idx}"):
+                st.session_state.portfolio.pop(idx); st.rerun()
 
     st.divider()
-    df_calc = pd.DataFrame(st.session_state.portfolio)
-    df_calc['G_Deger'] = df_calc['adet'] * df_calc['guncel_fiyat']
-    df_calc['T_Maliyet'] = df_calc['adet'] * df_calc['maliyet']
+    df_res = pd.DataFrame(st.session_state.portfolio)
+    df_res['G_Deger'] = df_res['adet'] * df_res['guncel_fiyat']
+    df_res['T_Maliyet'] = df_res['adet'] * df_res['maliyet']
     
-    t1, t2 = st.tabs(["📊 Kar/Zarar Performansı", "🔍 Varlık Röntgeni (KAP)"])
+    t1, t2 = st.tabs(["📊 Analiz", "🔍 KAP Röntgeni"])
     
     with t1:
-        df_calc['USD Bazlı %'] = ((df_calc['G_Deger']/u_now)/(df_calc['T_Maliyet']/df_calc['u_maliyet'])-1)*100
-        df_calc['Altın Bazlı %'] = ((df_calc['G_Deger']/g_now)/(df_calc['T_Maliyet']/df_calc['g_maliyet'])-1)*100
-        df_calc['Kar/Zarar %'] = ((df_calc['guncel_fiyat']/df_calc['maliyet'])-1)*100
-        
-        st.dataframe(df_calc[['kod', 'tarih', 'maliyet', 'guncel_fiyat', 'Kar/Zarar %', 'USD Bazlı %', 'Altın Bazlı %']].style.format({
-            'maliyet': '{:.6f}', 'guncel_fiyat': '{:.6f}', 'Kar/Zarar %': '% {:.2f}', 
-            'USD Bazlı %': '% {:.2f}', 'Altın Bazlı %': '% {:.2f}'
-        }).background_gradient(cmap='RdYlGn', subset=['Kar/Zarar %', 'USD Bazlı %', 'Altın Bazlı %']), use_container_width=True)
+        df_res['USD %'] = ((df_res['G_Deger']/u_now)/(df_res['T_Maliyet']/df_res['u_maliyet'])-1)*100
+        df_res['ALTIN %'] = ((df_res['G_Deger']/g_now)/(df_res['T_Maliyet']/df_res['g_maliyet'])-1)*100
+        st.dataframe(df_res[['kod', 'tarih', 'maliyet', 'guncel_fiyat', 'USD %', 'ALTIN %']].style.format({
+            'maliyet': '{:.6f}', 'guncel_fiyat': '{:.6f}', 'USD %': '% {:.2f}', 'ALTIN %': '% {:.2f}'
+        }).background_gradient(cmap='RdYlGn'), use_container_width=True)
 
     with t2:
         all_assets = []
-        for _, row in df_calc.iterrows():
+        for _, row in df_res.iterrows():
             comp = KAP_DATA.get(row['kod'], {row['kod']: 1.0})
             for asset, ratio in comp.items():
                 all_assets.append({"Varlık": asset, "Değer": row['G_Deger'] * ratio})
         
         asset_df = pd.DataFrame(all_assets).groupby("Varlık").sum().reset_index().sort_values(by="Değer", ascending=False)
-        asset_df["Yüzde (%)"] = (asset_df["Değer"] / asset_df["Değer"].sum()) * 100
         
-        
-        
-        cp, cl = st.columns([1.5, 1])
-        with cp:
-            st.plotly_chart(px.pie(asset_df, values='Değer', names='Varlık', hole=0.4), use_container_width=True)
-        with cl:
-            st.dataframe(asset_df.style.format({'Değer': '{:,.2f} ₺', 'Yüzde (%)': '% {:.2f}'}), use_container_width=True)
+        c_pie, c_list = st.columns([1.5, 1])
+        with c_pie: st.plotly_chart(px.pie(asset_df, values='Değer', names='Varlık', hole=0.4), use_container_width=True)
+        with c_list: st.dataframe(asset_df.style.format({'Değer': '{:,.2f} ₺'}), use_container_width=True)
 
-    st.divider()
     m1, m2, m3 = st.columns(3)
-    m1.metric("Toplam Portföy", f"{df_calc['G_Deger'].sum():,.2f} ₺")
-    m2.metric("Toplam Maliyet", f"{df_calc['T_Maliyet'].sum():,.2f} ₺")
-    m3.metric("Net Getiri", f"% {((df_calc['G_Deger'].sum()/df_calc['T_Maliyet'].sum())-1)*100:.2f}")
+    m1.metric("Toplam Değer", f"{df_res['G_Deger'].sum():,.2f} ₺")
+    m2.metric("Net Kar/Zarar", f"% {((df_res['G_Deger'].sum()/df_res['T_Maliyet'].sum())-1)*100:.2f}")
+    m3.metric("Maliyet", f"{df_res['T_Maliyet'].sum():,.2f} ₺")
 else:
-    st.info("👋 Hoş geldiniz! Başlamak için TEFAS Excel dosyasını yükleyin veya manuel fon girişi yapın.")
+    st.info("👋 Başlamak için Excel yükleyin veya manuel fon ekleyin.")
