@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta
 
 # 1. AYARLAR
-st.set_page_config(page_title="Zenith Pro: Stabil Sürüm", layout="wide")
+st.set_page_config(page_title="Zenith Pro: Final", layout="wide")
 
 # 2. VERİ MOTORU
 @st.cache_data(ttl=3600)
@@ -16,112 +16,109 @@ def get_kur_data(ticker, date_str):
         return float(data['Close'].iloc[0]) if not data.empty else 1.0
     except: return 1.0
 
-@st.cache_data(ttl=300)
-def get_live_price(ticker):
-    try:
-        data = yf.download(ticker, period="1d", progress=False)
-        return float(data['Close'].iloc[-1]) if not data.empty else 1.0
-    except: return 1.0
-
-def get_inflation_factor(start_date):
-    if isinstance(start_date, str): start_date = datetime.strptime(start_date, '%Y-%m-%d')
-    months_diff = (datetime.now().year - start_date.year) * 12 + (datetime.now().month - start_date.month)
-    return (1 + 0.042) ** max(0, months_diff)
-
-# 3. BELLEK YÖNETİMİ
+# 3. BELLEK
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# 4. SOL MENÜ (DOSYA İŞLEMLERİ)
+# 4. SIDEBAR (DOSYA)
 with st.sidebar:
     st.header("💾 Dosya İşlemleri")
-    up_file = st.file_uploader("Yedek Yükle", type=['json'])
-    if up_file:
+    up_file = st.file_uploader("JSON Yedeği Yükle", type=['json'])
+    if up_file is not None:
         try:
             data = json.load(up_file)
             for item in data:
-                if isinstance(item['tarih'], str): item['tarih'] = datetime.strptime(item['tarih'], '%Y-%m-%d').date()
+                if isinstance(item['tarih'], str): 
+                    item['tarih'] = datetime.strptime(item['tarih'], '%Y-%m-%d').date()
             st.session_state.portfolio = data
-            st.success("Yüklendi!")
-        except: st.error("Dosya hatası!")
-    
+            st.success("Yedek Yüklendi!")
+        except: st.error("Yükleme başarısız.")
+
     if st.session_state.portfolio:
-        save_data = []
+        save_list = []
         for i in st.session_state.portfolio:
-            temp = i.copy()
-            if hasattr(temp['tarih'], 'strftime'): temp['tarih'] = temp['tarih'].strftime('%Y-%m-%d')
-            save_data.append(temp)
-        st.download_button("📥 Portföyü İndir", json.dumps(save_data), "portfoy.json", use_container_width=True)
+            t = i.copy()
+            if hasattr(t['tarih'], 'strftime'): t['tarih'] = t['tarih'].strftime('%Y-%m-%d')
+            save_list.append(t)
+        st.download_button("📥 Portföyü İndir", json.dumps(save_list), "portfoy_yedek.json", use_container_width=True)
 
-# 5. ANA EKRAN: YENİ FON EKLEME (EN BASİT HALİ)
-st.title("🛡️ Zenith Pro: Kesintisiz Analiz")
-st.subheader("➕ Yeni Fon Ekle")
+# 5. ANA EKRAN (ALT ALTA GİRİŞ - GARANTİ YÖNTEM)
+st.title("🛡️ Zenith Pro: Kesin Çözüm")
+st.markdown("### ➕ Yeni Fon Ekle")
 
-# Sütunları zorla oluşturuyoruz
-c1, c2, c3, c4, c5 = st.columns(5)
-with c1: f_kod = st.text_input("Fon Kodu", key="new_kod").upper().strip()
-with c2: f_tar = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=30), key="new_tar")
-with c3: f_adet = st.number_input("Adet", min_value=0.0, format="%.4f", key="new_adet")
-with c4: f_alis = st.number_input("Alış Fiyatı (₺)", min_value=0.0, format="%.4f", key="new_alis")
-with c5: f_gun = st.number_input("Güncel Fiyat (₺)", min_value=0.0, format="%.4f", key="new_gun")
+# Sütunları bıraktık, alt alta en güvenli girişleri yapıyoruz
+f_kod = st.text_input("1. Fon Kodu", key="f_kod").upper().strip()
+f_tar = st.date_input("2. Alış Tarihi", value=datetime.now() - timedelta(days=30), key="f_tar")
+f_adet = st.number_input("3. Adet", min_value=0.0, format="%.4f", step=0.0001, key="f_adet")
+f_alis = st.number_input("4. Birim Alış Fiyatı (₺)", min_value=0.0, format="%.4f", step=0.0001, key="f_alis")
+f_gun = st.number_input("5. Birim Güncel Fiyat (₺)", min_value=0.0, format="%.4f", step=0.0001, key="f_gun")
 
-if st.button("🚀 Listeye Ekle", use_container_width=True):
+if st.button("✅ LİSTEYE KAYDET", use_container_width=True):
     if f_kod and f_adet > 0:
-        d_s = f_tar.strftime('%Y-%m-%d')
-        u_o = get_kur_data("USDTRY=X", d_s)
-        g_o = get_kur_data("GBPTRY=X", d_s)
-        gold_o = (get_kur_data("GC=F", d_s) / 31.10) * u_o
-        
-        st.session_state.portfolio.append({
-            "kod": f_kod, "tarih": f_tar, "adet": f_adet, 
-            "maliyet": f_alis, "guncel": f_gun if f_gun > 0 else f_alis,
-            "usd_old": u_o, "gbp_old": g_o, "gold_old": gold_o
-        })
-        st.rerun()
+        with st.spinner("Kurlar hesaplanıyor..."):
+            d_s = f_tar.strftime('%Y-%m-%d')
+            u_o = get_kur_data("USDTRY=X", d_s)
+            g_o = get_kur_data("GBPTRY=X", d_s)
+            gold_o = (get_kur_data("GC=F", d_s) / 31.10) * u_o
+            
+            # Veriyi session_state'e ekle
+            new_entry = {
+                "kod": f_code if 'f_code' in locals() else f_kod, 
+                "tarih": f_tar, 
+                "adet": f_adet, 
+                "maliyet": f_alis, 
+                "guncel": f_gun if f_gun > 0 else f_alis,
+                "usd_old": u_o, "gbp_old": g_o, "gold_old": gold_o
+            }
+            st.session_state.portfolio.append(new_entry)
+            st.success(f"{f_kod} başarıyla eklendi!")
+            st.rerun()
     else:
-        st.warning("Eksik bilgi girdiniz!")
+        st.error("Lütfen Fon Kodu ve Adet alanlarını doldurun!")
 
 st.divider()
 
 # 6. TABLO VE ANALİZ
 if st.session_state.portfolio:
-    # LİSTE DÜZENLEME
-    with st.expander("⚙️ Portföyü Düzenle", expanded=True):
-        to_del = None
-        for i, item in enumerate(st.session_state.portfolio):
-            cols = st.columns([1, 1, 1, 1, 1, 0.5])
-            cols[0].write(f"**{item['kod']}**")
-            cols[1].write(item['tarih'].strftime('%d.%m.%Y'))
-            st.session_state.portfolio[i]['adet'] = cols[2].number_input("Adet", value=float(item['adet']), key=f"e_a_{i}", label_visibility="collapsed")
-            st.session_state.portfolio[i]['maliyet'] = cols[3].number_input("Alış", value=float(item['maliyet']), key=f"e_m_{i}", label_visibility="collapsed")
-            st.session_state.portfolio[i]['guncel'] = cols[4].number_input("Güncel", value=float(item['guncel']), key=f"e_g_{i}", label_visibility="collapsed")
-            if cols[5].button("🗑️", key=f"btn_d_{i}"): to_del = i
-        if to_del is not None:
-            st.session_state.portfolio.pop(to_del)
-            st.rerun()
-
-    # HESAPLAMALAR
-    u_n = get_live_price("USDTRY=X")
-    g_n = get_live_price("GBPTRY=X")
-    gold_n = (get_live_price("GC=F") / 31.10) * u_n
+    st.subheader("📋 Mevcut Portföy ve Düzenleme")
     
-    rows = []
+    # Düzenleme Alanı
+    for i, item in enumerate(st.session_state.portfolio):
+        with st.expander(f"📌 {item['kod']} - {item['tarih']}", expanded=False):
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 0.5])
+            st.session_state.portfolio[i]['adet'] = c1.number_input(f"Adet ({item['kod']})", value=float(item['adet']), key=f"ed_a_{i}")
+            st.session_state.portfolio[i]['maliyet'] = c2.number_input(f"Alış ({item['kod']})", value=float(item['maliyet']), key=f"ed_m_{i}")
+            st.session_state.portfolio[i]['guncel'] = c3.number_input(f"Güncel ({item['kod']})", value=float(item['guncel']), key=f"ed_g_{i}")
+            if c4.button("🗑️ Sil", key=f"del_{i}"):
+                st.session_state.portfolio.pop(i)
+                st.rerun()
+
+    # Özet Tablo
+    u_n = yf.download("USDTRY=X", period="1d", progress=False)['Close'].iloc[-1]
+    gold_n = (yf.download("GC=F", period="1d", progress=False)['Close'].iloc[-1] / 31.10) * u_n
+    
+    res = []
     for item in st.session_state.portfolio:
         t_m = item['adet'] * item['maliyet']
         t_g = item['adet'] * item['guncel']
-        inf = get_inflation_factor(item['tarih'])
-        rows.append({
-            "Fon": item['kod'], "Sermaye": t_m, "Değer": t_g,
-            "Enflasyon (₺)": t_g - (t_m * inf),
-            "Dolar ($)": (t_g / u_n) - (t_m / item['usd_old']),
-            "Altın (gr)": (t_g / gold_n) - (t_m / item['gold_old'])
+        res.append({
+            "Fon": item['kod'],
+            "Maliyet (₺)": t_m,
+            "Güncel (₺)": t_g,
+            "Kar/Zarar (₺)": t_g - t_m,
+            "Dolar ($) Farkı": (t_g / u_n) - (t_m / item['usd_old']),
+            "Altın (gr) Farkı": (t_g / gold_n) - (t_m / item['gold_old'])
         })
     
-    st.dataframe(pd.DataFrame(rows).style.format("{:,.2f}"), use_container_width=True)
-
-    # ÖZET
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(res)
+    st.dataframe(df.style.format("{:,.2f}"), use_container_width=True)
+    
+    # Metrikler
+    st.divider()
     m1, m2, m3 = st.columns(3)
-    m1.metric("Toplam Sermaye", f"{df['Sermaye'].sum():,.2f} ₺")
-    m2.metric("Portföy Değeri", f"{df['Değer'].sum():,.2f} ₺")
-    m3.metric("Reel Dolar Farkı", f"{df['Dolar ($)'].sum():+,.2f} $")
+    m1.metric("Toplam Sermaye", f"{df['Maliyet (₺)'].sum():,.2f} ₺")
+    m2.metric("Portföy Değeri", f"{df['Güncel (₺)'].sum():,.2f} ₺")
+    m3.metric("Reel Dolar Kazancı", f"{df['Dolar ($) Farkı'].sum():+,.2f} $")
+
+else:
+    st.info("Henüz fon eklenmemiş.")
