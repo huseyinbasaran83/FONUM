@@ -73,10 +73,11 @@ with st.sidebar:
 
     st.divider()
     st.header("➕ Fon Ekle")
-    f_code = st.text_input("Fon Kodu").upper().strip()
+    f_code = st.text_input("Fon Kodu (Örn: TCD)").upper().strip()
     f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=180))
-    f_qty = st.number_input("Adet", min_value=0.0, format="%.4f")
-    f_cost = st.number_input("Birim Alış (TL)", min_value=0.0, format="%.4f")
+    f_qty = st.number_input("Adet", min_value=0.0, step=0.0001, format="%.4f")
+    f_cost = st.number_input("Birim Alış Fiyatı (TL)", min_value=0.0, step=0.0001, format="%.4f")
+    f_now = st.number_input("Güncel Birim Fiyat (TL)", min_value=0.0, step=0.0001, format="%.4f")
     
     if st.button("➕ Listeye Ekle", use_container_width=True):
         if f_code and f_qty > 0:
@@ -88,7 +89,7 @@ with st.sidebar:
                 
                 st.session_state.portfolio.append({
                     "kod": f_code, "tarih": f_date, "adet": f_qty, 
-                    "maliyet": f_cost, "guncel": f_cost,
+                    "maliyet": f_cost, "guncel": f_now,
                     "usd_old": u_o, "gbp_old": g_o, "gold_old": gold_o
                 })
                 st.rerun()
@@ -99,22 +100,23 @@ st.title("🛡️ Zenith Pro: Kesintisiz Analiz")
 if st.session_state.portfolio:
     with st.expander("⚙️ Portföy Listesi ve Düzenleme", expanded=True):
         to_del = None
+        # Liste üzerinde doğrudan değişiklik yapmak için döngü
         for i, item in enumerate(st.session_state.portfolio):
             c = st.columns([1, 1.2, 1, 1, 1, 0.5])
             with c[0]: st.info(f"**{item['kod']}**")
             with c[1]: 
                 d_val = item['tarih']
                 st.write(d_val.strftime('%d.%m.%Y') if hasattr(d_val, 'strftime') else str(d_val))
-            with c[2]: st.session_state.portfolio[i]['adet'] = c[2].number_input("Adet", value=float(item['adet']), key=f"q_{i}", label_visibility="collapsed")
-            with c[3]: st.session_state.portfolio[i]['maliyet'] = c[3].number_input("Mal", value=float(item['maliyet']), key=f"m_{i}", label_visibility="collapsed")
-            with c[4]: st.session_state.portfolio[i]['guncel'] = c[4].number_input("Gün", value=float(item['guncel']), key=f"g_{i}", label_visibility="collapsed")
+            with c[2]: st.session_state.portfolio[i]['adet'] = c[2].number_input("Adet", value=float(item['adet']), key=f"q_{i}", format="%.4f", label_visibility="collapsed")
+            with c[3]: st.session_state.portfolio[i]['maliyet'] = c[3].number_input("Alış", value=float(item['maliyet']), key=f"m_{i}", format="%.4f", label_visibility="collapsed")
+            with c[4]: st.session_state.portfolio[i]['guncel'] = c[4].number_input("Güncel", value=float(item['guncel']), key=f"g_{i}", format="%.4f", label_visibility="collapsed")
             with c[5]: 
                 if c[5].button("🗑️", key=f"d_{i}"): to_del = i
         if to_del is not None:
             st.session_state.portfolio.pop(to_del)
             st.rerun()
 
-    with st.spinner("Güncel kurlar işleniyor..."):
+    with st.spinner("Piyasa kurları güncelleniyor..."):
         u_n = get_live_price("USDTRY=X")
         g_n = get_live_price("GBPTRY=X")
         gold_n = (get_live_price("GC=F") / 31.10) * u_n
@@ -125,10 +127,9 @@ if st.session_state.portfolio:
             t_gun = item['adet'] * item['guncel']
             inf = get_inflation_factor(item['tarih'])
             
-            # Hatalı değişkenler düzeltildi
             final_rows.append({
                 "Fon": item['kod'],
-                "Alış Tutarı": t_mal,
+                "Toplam Alış": t_mal,
                 "Güncel Değer": t_gun,
                 "Enflasyon Farkı (₺)": t_gun - (t_mal * inf),
                 "Dolar Farkı ($)": (t_gun / u_n) - (t_mal / item['usd_old']),
@@ -140,7 +141,7 @@ if st.session_state.portfolio:
 
     st.subheader("📋 Reel Performans Tablosu")
     st.dataframe(df.style.format({
-        "Alış Tutarı": "{:,.2f} ₺", "Güncel Değer": "{:,.2f} ₺",
+        "Toplam Alış": "{:,.2f} ₺", "Güncel Değer": "{:,.2f} ₺",
         "Enflasyon Farkı (₺)": "{:+.2f} ₺", "Dolar Farkı ($)": "{:+.2f} $",
         "Sterlin Farkı (£)": "{:+.2f} £", "Altın Farkı (gr)": "{:+.2f} gr"
     }).applymap(lambda x: 'color: #00FF00' if (isinstance(x, (int, float)) and x > 0) else 'color: #FF4B4B', 
@@ -148,8 +149,8 @@ if st.session_state.portfolio:
 
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Ana Sermaye", f"{df['Alış Tutarı'].sum():,.2f} ₺")
-    m2.metric("Portföy Değeri", f"{df['Güncel Değer'].sum():,.2f} ₺", delta=f"{df['Güncel Değer'].sum() - df['Alış Tutarı'].sum():,.2f} ₺")
+    m1.metric("Toplam Sermaye", f"{df['Toplam Alış'].sum():,.2f} ₺")
+    m2.metric("Portföy Değeri", f"{df['Güncel Değer'].sum():,.2f} ₺", delta=f"{df['Güncel Değer'].sum() - df['Toplam Alış'].sum():,.2f} ₺")
     m3.metric("Reel Dolar Farkı", f"{df['Dolar Farkı ($)'].sum():+,.2f} $")
     m4.metric("Reel Altın Farkı", f"{df['Altın Farkı (gr)'].sum():+,.2f} gr")
 
