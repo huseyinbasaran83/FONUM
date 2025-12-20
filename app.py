@@ -4,98 +4,71 @@ import yfinance as yf
 import json
 from datetime import datetime, timedelta
 
-# --- 1. AYARLAR ---
-st.set_page_config(page_title="Zenith Kesin Cozum", layout="wide")
+st.set_page_config(page_title="Zenith Pro: Kurtarma Modu", layout="wide")
 
-# Belleği sıfırdan başlat
-if 'DATA' not in st.session_state:
-    st.session_state['DATA'] = []
+# --- 1. VERİLERİNİ KODA GÖMDÜK (DOSYA YÜKLENEMEZSE BURADAN ÇALIŞIR) ---
+SABIT_VERI = [
+    {"kod": "NLE", "tarih": "2025-06-04", "adet": 13922.0, "maliyet": 1.005556, "guncel": 1.259509, "usd_old": 39.1445999, "gbp_old": 52.9526, "gold_old": 4246.11},
+    {"kod": "NLE", "tarih": "2025-07-29", "adet": 20262.0, "maliyet": 1.243136, "guncel": 1.259509, "usd_old": 40.561698, "gbp_old": 54.1986, "gold_old": 4334.49},
+    {"kod": "TTE", "tarih": "2024-02-06", "adet": 14955.0, "maliyet": 0.787447, "guncel": 0.991358, "usd_old": 30.536800, "gbp_old": 38.2068, "gold_old": 1997.65},
+    {"kod": "DTM", "tarih": "2025-06-13", "adet": 11064.0, "maliyet": 0.994418, "guncel": 1.145821, "usd_old": 39.395599, "gbp_old": 53.6745, "gold_old": 4346.43},
+    {"kod": "ICZ", "tarih": "2024-02-06", "adet": 1781.0, "maliyet": 4.399736, "guncel": 5.894043, "usd_old": 30.536800, "gbp_old": 38.2068, "gold_old": 1997.65},
+    {"kod": "BDS", "tarih": "2025-04-09", "adet": 1180.0, "maliyet": 1.694492, "guncel": 2.370899, "usd_old": 38.007999, "gbp_old": 48.5092, "gold_old": 3735.41},
+    {"kod": "BDS", "tarih": "2025-09-18", "adet": 3213.0, "maliyet": 2.489381, "guncel": 2.370899, "usd_old": 41.301101, "gbp_old": 56.2959, "gold_old": 4838.86},
+    {"kod": "KOT", "tarih": "2025-08-26", "adet": 4004.0, "maliyet": 1.248606, "guncel": 1.22724, "usd_old": 41.003501, "gbp_old": 55.1604, "gold_old": 4467.66},
+    {"kod": "KOT", "tarih": "2025-11-03", "adet": 4164.0, "maliyet": 1.200711, "guncel": 1.22724, "usd_old": 42.039619, "gbp_old": 55.2497, "gold_old": 5407.43},
+    {"kod": "IIH", "tarih": "2024-02-06", "adet": 283.0, "maliyet": 17.322261, "guncel": 27.889396, "usd_old": 30.536800, "gbp_old": 38.2068, "gold_old": 1997.65},
+    {"kod": "IIH", "tarih": "2025-03-14", "adet": 76.0, "maliyet": 26.2125, "guncel": 27.889396, "usd_old": 36.679599, "gbp_old": 47.5218, "gold_old": 3531.73}
+]
 
-# --- 2. DOSYA YUKLEME ---
-with st.sidebar:
-    st.header("1. ADIM: YEDEK YUKLE")
-    f = st.file_uploader("JSON Dosyası", type=['json'], key="uploader_final")
-    if f:
-        try:
-            raw = json.load(f)
-            processed = []
-            for r in raw:
-                if isinstance(r.get('tarih'), str):
-                    r['tarih'] = datetime.strptime(r['tarih'], '%Y-%m-%d').date()
-                processed.append(r)
-            if st.button("YEDEGI LISTEYE AKTAR"):
-                st.session_state['DATA'] = processed
-                st.rerun()
-        except: st.error("Dosya okunamadı.")
+# Belleği başlat ve eğer boşsa sabit veriyi yükle
+if 'portfolio' not in st.session_state or len(st.session_state.portfolio) == 0:
+    for item in SABIT_VERI:
+        if isinstance(item['tarih'], str):
+            item['tarih'] = datetime.strptime(item['tarih'], '%Y-%m-%d').date()
+    st.session_state.portfolio = SABIT_VERI
 
-# --- 3. MANUEL FON EKLEME (METIN KUTUSU YONTEMI) ---
-st.title("🛡️ Zenith Portfoy Takip (Stabil Surum)")
-st.info("Ekleme yapamıyorsanız veya kutular eksikse lütfen reklam engelleyicinizi (AdBlock) kapatın.")
+# --- 2. GİRİŞ ALANLARI (ALT ALTA VE KESİN) ---
+st.title("🛡️ Zenith Pro: Kesin Kayıt Paneli")
 
-st.subheader("2. ADIM: YENI FON EKLE")
-
-# Sayı girişlerini metin kutusuna çevirdik (Engellenmemesi için)
-in_kod = st.text_input("FON KODU (Orn: TCD)", key="in1").upper().strip()
-in_tar = st.date_input("ALIS TARIHI", key="in2")
-in_adet = st.text_input("ADET (Miktar girin)", value="0.0", key="in3")
-in_alis = st.text_input("BIRIM ALIS FIYATI (₺)", value="0.0", key="in4")
-# En kritik kutu:
-in_guncel = st.text_input("GUNCEL BIRIM FIYAT (₺) - MUTLAKA DOLDURUN", value="0.0", key="in5")
-
-if st.button("🚀 PORTFOYE EKLE"):
-    if in_kod:
-        try:
-            # Metinleri sayıya çevir
-            a = float(in_adet.replace(',', '.'))
-            m = float(in_alis.replace(',', '.'))
-            g = float(in_guncel.replace(',', '.'))
-            
-            if a > 0:
-                with st.spinner("Kurlar cekiliyor..."):
-                    # Gecmis kur
-                    d_s = in_tar.strftime('%Y-%m-%d')
-                    u = yf.download("USDTRY=X", start=d_s, end=(in_tar + timedelta(days=5)).strftime('%Y-%m-%d'), progress=False)
-                    u_old = float(u['Close'].iloc[0]) if not u.empty else 1.0
-                    
-                    # Kaydet
-                    yeni = {
-                        "kod": in_kod, "tarih": in_tar, "adet": a, 
-                        "maliyet": m, "guncel": g, "usd_old": u_old
-                    }
-                    st.session_state['DATA'].append(yeni)
-                    st.success("Eklendi!")
-                    st.rerun()
-            else: st.error("Adet 0'dan buyuk olmalı.")
-        except: st.error("Lutfen sayı kutularına sadece rakam girin (Orn: 10.5)")
-    else: st.error("Fon kodu bos olamaz.")
+with st.expander("➕ YENİ FON EKLEME ALANI", expanded=True):
+    f_kod = st.text_input("FON KODU").upper()
+    f_tar = st.date_input("ALIŞ TARİHİ")
+    f_adet = st.number_input("ADET", format="%.4f")
+    f_alis = st.number_input("BİRİM ALIŞ (₺)", format="%.4f")
+    f_gun = st.number_input("BİRİM GÜNCEL (₺) <--- ARADIĞINIZ HÜCRE BURADA", format="%.4f")
+    
+    if st.button("🚀 LİSTEYE EKLE VE HESAPLA"):
+        if f_kod and f_adet > 0:
+            # Otomatik dolar kuru (geçmiş)
+            u_o = yf.download("USDTRY=X", start=f_tar, end=(f_tar + timedelta(days=5)), progress=False)['Close'].iloc[0]
+            st.session_state.portfolio.append({
+                "kod": f_kod, "tarih": f_tar, "adet": f_adet, "maliyet": f_alis, "guncel": f_gun, "usd_old": u_o
+            })
+            st.success("Eklendi!")
+            st.rerun()
 
 st.divider()
 
-# --- 4. TABLO ---
-if st.session_state['DATA']:
-    st.subheader("3. ADIM: MEVCUT DURUM")
+# --- 3. TABLO VE GÜNCEL KURLAR ---
+if st.session_state.portfolio:
+    u_n = yf.download("USDTRY=X", period="1d", progress=False)['Close'].iloc[-1]
     
-    # Guncel Dolar
-    try: u_n = yf.download("USDTRY=X", period="1d", progress=False)['Close'].iloc[-1]
-    except: u_n = 1.0
-    
-    final_list = []
-    for i, item in enumerate(st.session_state['DATA']):
-        top_m = item['adet'] * item['maliyet']
-        top_g = item['adet'] * item['guncel']
+    st.subheader("📋 Mevcut Portföy Analizi")
+    sonuclar = []
+    for i, f in enumerate(st.session_state.portfolio):
+        m_top = f['adet'] * f['maliyet']
+        g_top = f['adet'] * f['guncel']
         
-        final_list.append({
-            "KOD": item['kod'],
-            "ADET": item['adet'],
-            "TOPLAM MALIYET": f"{top_m:,.2f} TL",
-            "GUNCEL DEGER": f"{top_g:,.2f} TL",
-            "DOLAR FARKI ($)": f"{((top_g/u_n) - (top_m/item['usd_old'])):,.2f} $"
+        sonuclar.append({
+            "KOD": f['kod'],
+            "ADET": f['adet'],
+            "TOPLAM ALIŞ": f"{m_top:,.2f} ₺",
+            "GÜNCEL DEĞER": f"{g_top:,.2f} ₺",
+            "DOLAR FARKI ($)": f"{((g_top/u_n) - (m_top/f['usd_old'])):,.2f} $"
         })
-        
-        if st.button(f"SİL: {item['kod']} ({i})", key=f"btn_{i}"):
-            st.session_state['DATA'].pop(i)
+        if st.button(f"🗑️ Sil: {f['kod']} ({i})", key=f"del_{i}"):
+            st.session_state.portfolio.pop(i)
             st.rerun()
 
-    st.table(final_list)
-else:
-    st.info("Liste bos. Yukaridan ekleme yapin.")
+    st.table(sonuclar)
