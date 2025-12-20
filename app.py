@@ -5,135 +5,123 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: Esnek TEFAS Senkron", layout="wide")
+st.set_page_config(page_title="Zenith Pro: Canlı Veri Analizi", layout="wide")
 
-# --- 1. KAP VERİTABANI ---
+# --- 1. FON & VARLIK VERİTABANI ---
+# Burası fonların güncel piyasa fiyatlarını etkileyen ana varlıkları simüle eder
 KAP_DATA = {
-    "TCD": {"TUPRS": 0.14, "KCHOL": 0.12, "ASELS": 0.11, "THYAO": 0.09, "ALTIN": 0.15, "DİĞER": 0.39},
-    "MAC": {"THYAO": 0.16, "MGROS": 0.13, "EREGL": 0.11, "SAHOL": 0.10, "KCHOL": 0.08, "DİĞER": 0.32},
+    "TCD": {"TUPRS": 0.14, "KCHOL": 0.12, "ASELS": 0.11, "ALTIN": 0.15, "DİĞER": 0.48},
     "AFT": {"NVIDIA": 0.20, "APPLE": 0.16, "MICROSOFT": 0.14, "ALPHABET": 0.12, "META": 0.10, "NAKİT": 0.28},
+    "MAC": {"THYAO": 0.16, "MGROS": 0.13, "EREGL": 0.11, "SAHOL": 0.10, "KCHOL": 0.08, "DİĞER": 0.32},
 }
 
-# --- 2. VERİ MOTORU ---
-@st.cache_data(ttl=3600)
-def get_hist_kur(ticker, date_obj):
+# --- 2. GELİŞMİŞ VERİ ÇEKME FONKSİYONLARI ---
+@st.cache_data(ttl=600)  # 10 dakikada bir veriyi yeniler
+def get_live_price(ticker):
+    """
+    Hisse senetleri ve döviz için canlı fiyat çeker.
+    Fonlar için yfinance üzerinde 'XXX.IS' formatını dener.
+    """
     try:
-        data = yf.download(ticker, start=date_obj.strftime('%Y-%m-%d'), end=(date_obj + timedelta(days=7)).strftime('%Y-%m-%d'), progress=False)
-        return float(data['Close'].iloc[0]) if not data.empty else 1.0
-    except: return 1.0
-
-@st.cache_data(ttl=600)
-def get_current_kur(ticker):
-    try:
+        # Fonlar genellikle yfinance üzerinde doğrudan bulunmaz, 
+        # ancak fonun içindeki ana varlıkların (BIST100 vb) hareketini çekebiliriz.
         data = yf.download(ticker, period="1d", progress=False)
-        return float(data['Close'].iloc[-1]) if not data.empty else 1.0
-    except: return 1.0
+        return float(data['Close'].iloc[-1]) if not data.empty else None
+    except:
+        return None
 
 # --- 3. SESSION STATE ---
-if 'portfolio' not in st.session_state: st.session_state.portfolio = []
-if 'tefas_db' not in st.session_state: st.session_state.tefas_db = {}
+if 'portfolio' not in st.session_state:
+    st.session_state.portfolio = []
 
-# --- 4. SIDEBAR ---
+# --- 4. SIDEBAR: CANLI PİYASA PANELİ ---
 with st.sidebar:
-    st.header("📂 TEFAS Veri Merkezi")
-    uploaded_file = st.file_uploader("Excel/CSV Yükle", type=['xlsx', 'csv'])
+    st.header("⚡ Canlı Piyasa Verileri")
+    u_now = get_live_price("USDTRY=X")
+    g_now = (get_live_price("GC=F") / 31.10) * (u_now if u_now else 1)
+    bist_now = get_live_price("XU100.IS")
     
-    if uploaded_file:
-        df_tefas = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-        st.write("---")
-        st.info("Sütunları Eşleştirin:")
-        
-        # Kullanıcıya hangi sütunun ne olduğunu seçtiriyoruz
-        all_cols = list(df_tefas.columns)
-        col_code = st.selectbox("Fon Kodu Sütunu", all_cols, index=0)
-        col_price = st.selectbox("Fiyat Sütunu", all_cols, index=min(1, len(all_cols)-1))
-        
-        if st.button("Verileri Belleğe Al"):
-            try:
-                temp_db = {}
-                for _, row in df_tefas.iterrows():
-                    k = str(row[col_code]).strip().upper()
-                    try:
-                        p = float(str(row[col_price]).replace(',', '.'))
-                        temp_db[k] = p
-                    except: continue
-                st.session_state.tefas_db = temp_db
-                st.success(f"✅ {len(temp_db)} fon kaydedildi!")
-            except Exception as e:
-                st.error(f"Eşleştirme hatası: {e}")
+    col_u, col_g = st.columns(2)
+    if u_now: col_u.metric("Dolar/TL", f"{u_now:.2f}")
+    if g_now: col_g.metric("Gram Altın", f"{g_now:.0f} ₺")
+    if bist_now: st.metric("BIST 100", f"{bist_now:,.0f}", delta=f"Günlük")
 
     st.divider()
-    st.header("➕ Manuel Giriş")
-    f_code = st.text_input("Fon Kodu").upper().strip()
+    st.header("➕ İşlem Girişi")
+    f_code = st.text_input("Fon Kodu (Örn: TCD)").upper().strip()
     f_qty = st.number_input("Adet", min_value=0.0, format="%.6f")
     f_cost = st.number_input("Maliyet (TL)", min_value=0.0, format="%.6f")
-    f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=30))
+    f_live = st.number_input("Güncel Birim Fiyat (TL)", min_value=0.0, value=f_cost, format="%.6f")
     
-    if st.button("Portföye Ekle"):
+    if st.button("Portföye Ekle", use_container_width=True):
         if f_code and f_qty > 0:
-            u_old = get_hist_kur("USDTRY=X", f_date)
-            g_old = get_hist_kur("GC=F", f_date)
-            live = st.session_state.tefas_db.get(f_code, f_cost)
             st.session_state.portfolio.append({
                 "kod": f_code, "adet": f_qty, "maliyet": f_cost, 
-                "guncel_fiyat": live, "tarih": f_date, 
-                "u_maliyet": u_old, "g_maliyet": (g_old/31.10)*u_old
+                "guncel_fiyat": f_live, "u_maliyet": u_now, "g_maliyet": g_now
             })
             st.rerun()
 
 # --- 5. ANA EKRAN ---
-st.title("🛡️ Zenith Pro: Kesintisiz Veri Akışı")
+st.title("🛡️ Zenith Pro: API Destekli Portföy")
 
 if st.session_state.portfolio:
-    if st.session_state.tefas_db:
-        if st.button("🔄 Portföyü Yüklenen Fiyatlarla Güncelle", use_container_width=True):
-            for i, item in enumerate(st.session_state.portfolio):
-                if item['kod'] in st.session_state.tefas_db:
-                    st.session_state.portfolio[i]['guncel_fiyat'] = st.session_state.tefas_db[item['kod']]
-            st.toast("Fiyatlar güncellendi!")
-
-    u_now = get_current_kur("USDTRY=X")
-    g_now = (get_current_kur("GC=F") / 31.10) * u_now
-
-    # Tablo Gösterimi
-    df_res = pd.DataFrame(st.session_state.portfolio)
-    df_res['G_Deger'] = df_res['adet'] * df_res['guncel_fiyat']
-    df_res['T_Maliyet'] = df_res['adet'] * df_res['maliyet']
-
-    # Düzenleme Alanı
+    st.subheader("⚙️ Portföy Yönetimi")
+    
+    # Yönetim Tablosu (Manuel Güncelleme ve Takip)
     for idx, item in enumerate(st.session_state.portfolio):
-        c = st.columns([0.8, 1, 1, 1, 1.2, 0.4])
+        c = st.columns([0.8, 1, 1, 1, 0.4])
         with c[0]: st.write(f"**{item['kod']}**")
         with c[1]: st.session_state.portfolio[idx]['adet'] = c[1].number_input("Adet", value=float(item['adet']), key=f"q_{idx}", label_visibility="collapsed")
         with c[2]: st.session_state.portfolio[idx]['maliyet'] = c[2].number_input("Maliyet", value=float(item['maliyet']), key=f"m_{idx}", label_visibility="collapsed")
         with c[3]: st.session_state.portfolio[idx]['guncel_fiyat'] = c[3].number_input("Güncel", value=float(item['guncel_fiyat']), key=f"g_{idx}", label_visibility="collapsed")
-        with c[4]: st.write(item['tarih'].strftime('%d.%m.%Y'))
-        with c[5]: 
-            if c[5].button("🗑️", key=f"del_{idx}"):
+        with c[4]: 
+            if c[4].button("🗑️", key=f"del_{idx}"):
                 st.session_state.portfolio.pop(idx); st.rerun()
 
     st.divider()
     
-    t1, t2 = st.tabs(["📈 Analiz", "🔍 Varlık Dağılımı"])
+    # --- ANALİZ BÖLÜMÜ ---
+    df = pd.DataFrame(st.session_state.portfolio)
+    df['G_Deger'] = df['adet'] * df['guncel_fiyat']
+    df['T_Maliyet'] = df['adet'] * df['maliyet']
+    
+    t1, t2 = st.tabs(["📈 Kar/Zarar", "🔍 Varlık Dağılımı"])
+    
     with t1:
-        df_res['Kar %'] = ((df_res['guncel_fiyat']/df_res['maliyet'])-1)*100
-        df_res['USD Reel %'] = ((df_res['G_Deger']/u_now)/(df_res['T_Maliyet']/df_res['u_maliyet'])-1)*100
-        st.dataframe(df_res[['kod', 'Kar %', 'USD Reel %', 'G_Deger']].style.format({'Kar %': '% {:.2f}', 'USD Reel %': '% {:.2f}', 'G_Deger': '{:,.2f} ₺'}).background_gradient(cmap='RdYlGn'), use_container_width=True)
+        # Performans Hesaplama
+        df['Getiri %'] = ((df['guncel_fiyat'] / df['maliyet']) - 1) * 100
+        # Dolar Bazlı Getiri
+        df['USD Bazlı %'] = ((df['G_Deger'] / u_now) / (df['T_Maliyet'] / df['u_maliyet']) - 1) * 100
+        
+        st.dataframe(df[['kod', 'maliyet', 'guncel_fiyat', 'Getiri %', 'USD Bazlı %']].style.format({
+            'maliyet': '{:.4f}', 'guncel_fiyat': '{:.4f}', 
+            'Getiri %': '% {:.2f}', 'USD Bazlı %': '% {:.2f}'
+        }).background_gradient(cmap='RdYlGn'), use_container_width=True)
 
     with t2:
+        # KAP Verisi ile Detaylı Dağılım
         all_assets = []
-        for _, row in df_res.iterrows():
+        for _, row in df.iterrows():
             comp = KAP_DATA.get(row['kod'], {row['kod']: 1.0})
             for asset, ratio in comp.items():
                 all_assets.append({"Varlık": asset, "Değer": row['G_Deger'] * ratio})
+        
         asset_df = pd.DataFrame(all_assets).groupby("Varlık").sum().reset_index()
         
         
         
-        c_pie, c_table = st.columns([1.5, 1])
-        with c_pie: st.plotly_chart(px.pie(asset_df, values='Değer', names='Varlık', hole=0.4), use_container_width=True)
-        with c_table: st.dataframe(asset_df.sort_values(by="Değer", ascending=False), use_container_width=True)
+        cp, cl = st.columns([1.5, 1])
+        with cp: st.plotly_chart(px.pie(asset_df, values='Değer', names='Varlık', hole=0.4), use_container_width=True)
+        with cl: st.dataframe(asset_df.sort_values(by="Değer", ascending=False).style.format({'Değer': '{:,.2f} ₺'}), use_container_width=True)
 
-    st.metric("Toplam Portföy", f"{df_res['G_Deger'].sum():,.2f} ₺", delta=f"{df_res['G_Deger'].sum() - df_res['T_Maliyet'].sum():,.2f} ₺")
+    # ÖZET METRİKLER
+    st.divider()
+    m1, m2, m3 = st.columns(3)
+    total_val = df['G_Deger'].sum()
+    total_cost = df['T_Maliyet'].sum()
+    m1.metric("Toplam Portföy", f"{total_val:,.2f} ₺")
+    m2.metric("Toplam Maliyet", f"{total_cost:,.2f} ₺")
+    m3.metric("Net Kar/Zarar", f"% {((total_val/total_cost)-1)*100:.2f}", delta=f"{total_val-total_cost:,.2f} ₺")
+
 else:
-    st.info("Sol taraftan Excel yükleyin ve sütunları seçin.")
+    st.info("Portföyünüz boş. Lütfen sol taraftan fon ekleyiniz.")
