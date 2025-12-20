@@ -4,108 +4,98 @@ import yfinance as yf
 import json
 from datetime import datetime, timedelta
 
-# 1. TÜM BELLEĞİ VE ID'LERİ SIFIRLAYAN AYAR
-st.set_page_config(page_title="Zenith Pro: Kesin Çözüm", layout="wide")
+# --- 1. AYARLAR ---
+st.set_page_config(page_title="Zenith Kesin Cozum", layout="wide")
 
-# Session State'i daha önce kullanılmamış anahtarlarla (keys) başlatıyoruz
-if 'ANA_LISTE' not in st.session_state:
-    st.session_state['ANA_LISTE'] = []
+# Belleği sıfırdan başlat
+if 'DATA' not in st.session_state:
+    st.session_state['DATA'] = []
 
-# 2. YARDIMCI FONKSİYONLAR
-def kur_getir(t):
-    try:
-        d_s = t.strftime('%Y-%m-%d')
-        u = yf.download("USDTRY=X", start=d_s, end=(t + timedelta(days=5)).strftime('%Y-%m-%d'), progress=False)
-        return float(u['Close'].iloc[0]) if not u.empty else 1.0
-    except: return 1.0
-
-# 3. YEDEK YÜKLEME (SOL PANEL)
+# --- 2. DOSYA YUKLEME ---
 with st.sidebar:
-    st.subheader("📁 DOSYA SİSTEMİ")
-    yeni_dosya = st.file_uploader("JSON Yedeği Seç", type=['json'], key="UNIQUE_UPLOADER_99")
-    
-    if yeni_dosya:
+    st.header("1. ADIM: YEDEK YUKLE")
+    f = st.file_uploader("JSON Dosyası", type=['json'], key="uploader_final")
+    if f:
         try:
-            veriler = json.load(yeni_dosya)
-            hazir_liste = []
-            for v in veriler:
-                if isinstance(v.get('tarih'), str):
-                    v['tarih'] = datetime.strptime(v['tarih'], '%Y-%m-%d').date()
-                hazir_liste.append(v)
-            
-            if st.button("LİSTEYE AKTAR", key="UNIQUE_ACTIVATE_BTN"):
-                st.session_state['ANA_LISTE'] = hazir_liste
+            raw = json.load(f)
+            processed = []
+            for r in raw:
+                if isinstance(r.get('tarih'), str):
+                    r['tarih'] = datetime.strptime(r['tarih'], '%Y-%m-%d').date()
+                processed.append(r)
+            if st.button("YEDEGI LISTEYE AKTAR"):
+                st.session_state['DATA'] = processed
                 st.rerun()
         except: st.error("Dosya okunamadı.")
 
-# 4. ANA EKRAN: VERİ GİRİŞİ (SIRALI VE NUMARALI)
-st.title("⚖️ Portföy Yönetim Paneli")
-st.write("---")
+# --- 3. MANUEL FON EKLEME (METIN KUTUSU YONTEMI) ---
+st.title("🛡️ Zenith Portfoy Takip (Stabil Surum)")
+st.info("Ekleme yapamıyorsanız veya kutular eksikse lütfen reklam engelleyicinizi (AdBlock) kapatın.")
 
-# Giriş alanlarını hiçbir yapı (column/form) kullanmadan, doğrudan alt alta koyuyoruz.
-# Her birinin Key'i daha önce hiç kullanılmamış isimler.
+st.subheader("2. ADIM: YENI FON EKLE")
 
-# SIRA 1
-st.subheader("1. Fon Tanımı")
-k_ad = st.text_input("FON KODU (Örn: BTC-USD)", key="K_1").upper()
+# Sayı girişlerini metin kutusuna çevirdik (Engellenmemesi için)
+in_kod = st.text_input("FON KODU (Orn: TCD)", key="in1").upper().strip()
+in_tar = st.date_input("ALIS TARIHI", key="in2")
+in_adet = st.text_input("ADET (Miktar girin)", value="0.0", key="in3")
+in_alis = st.text_input("BIRIM ALIS FIYATI (₺)", value="0.0", key="in4")
+# En kritik kutu:
+in_guncel = st.text_input("GUNCEL BIRIM FIYAT (₺) - MUTLAKA DOLDURUN", value="0.0", key="in5")
 
-# SIRA 2
-st.subheader("2. Tarih Seçimi")
-k_tar = st.date_input("ALIM TARİHİ", key="K_2")
+if st.button("🚀 PORTFOYE EKLE"):
+    if in_kod:
+        try:
+            # Metinleri sayıya çevir
+            a = float(in_adet.replace(',', '.'))
+            m = float(in_alis.replace(',', '.'))
+            g = float(in_guncel.replace(',', '.'))
+            
+            if a > 0:
+                with st.spinner("Kurlar cekiliyor..."):
+                    # Gecmis kur
+                    d_s = in_tar.strftime('%Y-%m-%d')
+                    u = yf.download("USDTRY=X", start=d_s, end=(in_tar + timedelta(days=5)).strftime('%Y-%m-%d'), progress=False)
+                    u_old = float(u['Close'].iloc[0]) if not u.empty else 1.0
+                    
+                    # Kaydet
+                    yeni = {
+                        "kod": in_kod, "tarih": in_tar, "adet": a, 
+                        "maliyet": m, "guncel": g, "usd_old": u_old
+                    }
+                    st.session_state['DATA'].append(yeni)
+                    st.success("Eklendi!")
+                    st.rerun()
+            else: st.error("Adet 0'dan buyuk olmalı.")
+        except: st.error("Lutfen sayı kutularına sadece rakam girin (Orn: 10.5)")
+    else: st.error("Fon kodu bos olamaz.")
 
-# SIRA 3
-st.subheader("3. Miktar")
-k_adet = st.number_input("ADET", min_value=0.0, format="%.4f", key="K_3")
+st.divider()
 
-# SIRA 4
-st.subheader("4. Alış Değeri")
-k_alis = st.number_input("ALIM BİRİM FİYATI (TL)", min_value=0.0, format="%.4f", key="K_4")
-
-# SIRA 5 - MEŞHUR GÜNCEL FİYAT HÜCRESİ
-st.subheader("5. Güncel Değer")
-k_guncel = st.number_input("ŞU ANKİ BİRİM FİYAT (TL)", min_value=0.0, format="%.4f", key="K_5_GUNCEL_CELL")
-
-# SIRA 6 - KAYDET BUTONU
-if st.button("👉 PORTFÖYE ŞİMDİ EKLE", use_container_width=True, key="K_6_SAVE"):
-    if k_ad and k_adet > 0:
-        u_eski = kur_getir(k_tar)
-        yeni_fon = {
-            "kod": k_ad, "tarih": k_tar, "adet": k_adet, 
-            "maliyet": k_alis, "guncel": k_guncel if k_guncel > 0 else k_alis,
-            "usd_old": u_eski
-        }
-        st.session_state['ANA_LISTE'].append(yeni_fon)
-        st.success("Başarıyla eklendi!")
-        st.rerun()
-    else:
-        st.error("Lütfen tüm alanları (özellikle Kod ve Adet) doldurun.")
-
-st.write("---")
-
-# 5. LİSTELEME VE HESAPLAMA
-if st.session_state['ANA_LISTE']:
-    st.subheader("📊 Güncel Liste")
+# --- 4. TABLO ---
+if st.session_state['DATA']:
+    st.subheader("3. ADIM: MEVCUT DURUM")
     
-    # Anlık kur
-    u_simdi = yf.download("USDTRY=X", period="1d", progress=False)['Close'].iloc[-1]
+    # Guncel Dolar
+    try: u_n = yf.download("USDTRY=X", period="1d", progress=False)['Close'].iloc[-1]
+    except: u_n = 1.0
     
-    df_verisi = []
-    for i, f in enumerate(st.session_state['ANA_LISTE']):
-        top_m = f['adet'] * f['maliyet']
-        top_g = f['adet'] * f['guncel']
+    final_list = []
+    for i, item in enumerate(st.session_state['DATA']):
+        top_m = item['adet'] * item['maliyet']
+        top_g = item['adet'] * item['guncel']
         
-        df_verisi.append({
-            "FON": f['kod'],
-            "TARİH": f['tarih'],
-            "TOPLAM ALIŞ": f"{top_m:,.2f} TL",
-            "GÜNCEL DEĞER": f"{top_g:,.2f} TL",
-            "DOLAR FARKI": f"{((top_g/u_simdi) - (top_m/f['usd_old'])):,.2f} $"
+        final_list.append({
+            "KOD": item['kod'],
+            "ADET": item['adet'],
+            "TOPLAM MALIYET": f"{top_m:,.2f} TL",
+            "GUNCEL DEGER": f"{top_g:,.2f} TL",
+            "DOLAR FARKI ($)": f"{((top_g/u_n) - (top_m/item['usd_old'])):,.2f} $"
         })
         
-        if st.button(f"SİL: {f['kod']} - {f['tarih']}", key=f"SIL_ID_{i}"):
-            st.session_state['ANA_LISTE'].pop(i)
+        if st.button(f"SİL: {item['kod']} ({i})", key=f"btn_{i}"):
+            st.session_state['DATA'].pop(i)
             st.rerun()
 
-    st.table(df_verisi)
+    st.table(final_list)
 else:
-    st.info("Portföyünüzde henüz fon bulunmuyor.")
+    st.info("Liste bos. Yukaridan ekleme yapin.")
