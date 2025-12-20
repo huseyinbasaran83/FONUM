@@ -5,123 +5,128 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Zenith Pro: Canlı Veri Analizi", layout="wide")
+st.set_page_config(page_title="Zenith: Reel Birim Analizi", layout="wide")
 
-# --- 1. FON & VARLIK VERİTABANI ---
-# Burası fonların güncel piyasa fiyatlarını etkileyen ana varlıkları simüle eder
-KAP_DATA = {
-    "TCD": {"TUPRS": 0.14, "KCHOL": 0.12, "ASELS": 0.11, "ALTIN": 0.15, "DİĞER": 0.48},
-    "AFT": {"NVIDIA": 0.20, "APPLE": 0.16, "MICROSOFT": 0.14, "ALPHABET": 0.12, "META": 0.10, "NAKİT": 0.28},
-    "MAC": {"THYAO": 0.16, "MGROS": 0.13, "EREGL": 0.11, "SAHOL": 0.10, "KCHOL": 0.08, "DİĞER": 0.32},
-}
-
-# --- 2. GELİŞMİŞ VERİ ÇEKME FONKSİYONLARI ---
-@st.cache_data(ttl=600)  # 10 dakikada bir veriyi yeniler
-def get_live_price(ticker):
-    """
-    Hisse senetleri ve döviz için canlı fiyat çeker.
-    Fonlar için yfinance üzerinde 'XXX.IS' formatını dener.
-    """
+# --- 1. VERİ MOTORU ---
+@st.cache_data(ttl=3600)
+def get_kur_data(ticker, date_obj):
     try:
-        # Fonlar genellikle yfinance üzerinde doğrudan bulunmaz, 
-        # ancak fonun içindeki ana varlıkların (BIST100 vb) hareketini çekebiliriz.
-        data = yf.download(ticker, period="1d", progress=False)
-        return float(data['Close'].iloc[-1]) if not data.empty else None
-    except:
-        return None
+        data = yf.download(ticker, start=date_obj.strftime('%Y-%m-%d'), 
+                           end=(date_obj + timedelta(days=7)).strftime('%Y-%m-%d'), progress=False)
+        return float(data['Close'].iloc[0]) if not data.empty else None
+    except: return None
 
-# --- 3. SESSION STATE ---
+@st.cache_data(ttl=600)
+def get_live_price(ticker):
+    try:
+        data = yf.download(ticker, period="1d", progress=False)
+        return float(data['Close'].iloc[-1]) if not data.empty else 1.0
+    except: return 1.0
+
+# --- 2. SESSION STATE ---
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = []
 
-# --- 4. SIDEBAR: CANLI PİYASA PANELİ ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
-    st.header("⚡ Canlı Piyasa Verileri")
-    u_now = get_live_price("USDTRY=X")
-    g_now = (get_live_price("GC=F") / 31.10) * (u_now if u_now else 1)
-    bist_now = get_live_price("XU100.IS")
+    st.header("📥 İşlem Girişi")
+    f_code = st.text_input("Fon Kodu").upper().strip()
+    f_date = st.date_input("Alış Tarihi", value=datetime.now() - timedelta(days=180))
+    f_qty = st.number_input("Adet", min_value=0.0, format="%.4f")
+    f_cost = st.number_input("Alış Fiyatı (TL)", min_value=0.0, format="%.4f")
+    f_now = st.number_input("Güncel Birim Fiyat (TL)", min_value=0.0, value=f_cost, format="%.4f")
     
-    col_u, col_g = st.columns(2)
-    if u_now: col_u.metric("Dolar/TL", f"{u_now:.2f}")
-    if g_now: col_g.metric("Gram Altın", f"{g_now:.0f} ₺")
-    if bist_now: st.metric("BIST 100", f"{bist_now:,.0f}", delta=f"Günlük")
-
-    st.divider()
-    st.header("➕ İşlem Girişi")
-    f_code = st.text_input("Fon Kodu (Örn: TCD)").upper().strip()
-    f_qty = st.number_input("Adet", min_value=0.0, format="%.6f")
-    f_cost = st.number_input("Maliyet (TL)", min_value=0.0, format="%.6f")
-    f_live = st.number_input("Güncel Birim Fiyat (TL)", min_value=0.0, value=f_cost, format="%.6f")
-    
-    if st.button("Portföye Ekle", use_container_width=True):
-        if f_code and f_qty > 0:
+    if st.button("➕ Portföye Ekle", use_container_width=True):
+        with st.spinner("Kurlar hesaplanıyor..."):
+            usd_old = get_kur_data("USDTRY=X", f_date)
+            gbp_old = get_kur_data("GBPTRY=X", f_date)
+            gold_old = (get_kur_data("GC=F", f_date) / 31.10) * (usd_old if usd_old else 1)
+            
             st.session_state.portfolio.append({
-                "kod": f_code, "adet": f_qty, "maliyet": f_cost, 
-                "guncel_fiyat": f_live, "u_maliyet": u_now, "g_maliyet": g_now
+                "kod": f_code, "tarih": f_date, "adet": f_qty, 
+                "maliyet": f_cost, "guncel": f_now,
+                "usd_old": usd_old, "gbp_old": gbp_old, "gold_old": gold_old
             })
             st.rerun()
 
-# --- 5. ANA EKRAN ---
-st.title("🛡️ Zenith Pro: API Destekli Portföy")
+# --- 4. ANA EKRAN ---
+st.title("⚖️ Zenith: Satın Alma Gücü Analizi")
 
 if st.session_state.portfolio:
-    st.subheader("⚙️ Portföy Yönetimi")
+    # Güncel Kurlar
+    u_now = get_live_price("USDTRY=X")
+    g_now = get_live_price("GBPTRY=X")
+    gold_now = (get_live_price("GC=F") / 31.10) * u_now
     
-    # Yönetim Tablosu (Manuel Güncelleme ve Takip)
-    for idx, item in enumerate(st.session_state.portfolio):
-        c = st.columns([0.8, 1, 1, 1, 0.4])
-        with c[0]: st.write(f"**{item['kod']}**")
-        with c[1]: st.session_state.portfolio[idx]['adet'] = c[1].number_input("Adet", value=float(item['adet']), key=f"q_{idx}", label_visibility="collapsed")
-        with c[2]: st.session_state.portfolio[idx]['maliyet'] = c[2].number_input("Maliyet", value=float(item['maliyet']), key=f"m_{idx}", label_visibility="collapsed")
-        with c[3]: st.session_state.portfolio[idx]['guncel_fiyat'] = c[3].number_input("Güncel", value=float(item['guncel_fiyat']), key=f"g_{idx}", label_visibility="collapsed")
-        with c[4]: 
-            if c[4].button("🗑️", key=f"del_{idx}"):
-                st.session_state.portfolio.pop(idx); st.rerun()
+    rows = []
+    for item in st.session_state.portfolio:
+        total_maliyet = item['adet'] * item['maliyet']
+        total_guncel = item['adet'] * item['guncel']
+        
+        # O günkü sermaye ile alınabilecek birimler
+        units_usd_then = total_maliyet / item['usd_old']
+        units_gbp_then = total_maliyet / item['gbp_old']
+        units_gold_then = total_maliyet / item['gold_old']
+        
+        # Bugün o parayla (fonun güncel değeriyle) alınabilecek birimler
+        units_usd_now = total_guncel / u_now
+        units_gbp_now = total_guncel / g_now
+        units_gold_now = total_guncel / gold_now
+        
+        # Reel Fark (Adet/Birim Bazında)
+        diff_usd = units_usd_now - units_usd_then
+        diff_gbp = units_gbp_now - units_gbp_then
+        diff_gold = units_gold_now - units_gold_then
+        
+        rows.append({
+            "Fon": item['kod'],
+            "Alış Tarihi": item['tarih'],
+            "Güncel Değer (₺)": total_guncel,
+            "Fark ($)": diff_usd,
+            "Fark (£)": diff_gbp,
+            "Fark (Gram Altın)": diff_gold
+        })
+    
+    df_diff = pd.DataFrame(rows)
+    
+    # 1. TABLO: BİRİM BAZLI FARK
+    st.subheader("🛡️ Reel Kazanç/Kayıp (Birim Bazında)")
+    st.markdown("> **Açıklama:** Eğer değer pozitifse, fonunuz o yatırım aracını yenmiş demektir. Negatifse, o yatırım aracına göre kaç birim (Dolar, Sterlin, Altın) kaybettiğinizi gösterir.")
+    
+    st.dataframe(df_diff.style.format({
+        "Güncel Değer (₺)": "{:,.2f}",
+        "Fark ($)": "{:+.2f} $",
+        "Fark (£)": "{:+.2f} £",
+        "Fark (Gram Altın)": "{:+.2f} gr"
+    }).applymap(lambda x: 'color: green' if (isinstance(x, float) and x > 0) else 'color: red', 
+                subset=["Fark ($)", "Fark (£)", "Fark (Gram Altın)"]), use_container_width=True)
 
     st.divider()
-    
-    # --- ANALİZ BÖLÜMÜ ---
-    df = pd.DataFrame(st.session_state.portfolio)
-    df['G_Deger'] = df['adet'] * df['guncel_fiyat']
-    df['T_Maliyet'] = df['adet'] * df['maliyet']
-    
-    t1, t2 = st.tabs(["📈 Kar/Zarar", "🔍 Varlık Dağılımı"])
-    
-    with t1:
-        # Performans Hesaplama
-        df['Getiri %'] = ((df['guncel_fiyat'] / df['maliyet']) - 1) * 100
-        # Dolar Bazlı Getiri
-        df['USD Bazlı %'] = ((df['G_Deger'] / u_now) / (df['T_Maliyet'] / df['u_maliyet']) - 1) * 100
-        
-        st.dataframe(df[['kod', 'maliyet', 'guncel_fiyat', 'Getiri %', 'USD Bazlı %']].style.format({
-            'maliyet': '{:.4f}', 'guncel_fiyat': '{:.4f}', 
-            'Getiri %': '% {:.2f}', 'USD Bazlı %': '% {:.2f}'
-        }).background_gradient(cmap='RdYlGn'), use_container_width=True)
 
-    with t2:
-        # KAP Verisi ile Detaylı Dağılım
-        all_assets = []
-        for _, row in df.iterrows():
-            comp = KAP_DATA.get(row['kod'], {row['kod']: 1.0})
-            for asset, ratio in comp.items():
-                all_assets.append({"Varlık": asset, "Değer": row['G_Deger'] * ratio})
-        
-        asset_df = pd.DataFrame(all_assets).groupby("Varlık").sum().reset_index()
-        
-        
-        
-        cp, cl = st.columns([1.5, 1])
-        with cp: st.plotly_chart(px.pie(asset_df, values='Değer', names='Varlık', hole=0.4), use_container_width=True)
-        with cl: st.dataframe(asset_df.sort_values(by="Değer", ascending=False).style.format({'Değer': '{:,.2f} ₺'}), use_container_width=True)
+    # 2. GRAFİK: REEL KAYIP/KAZANÇ RÖNTGENİ
+    st.subheader("📊 Birim Bazlı Kar/Zarar Grafiği")
+    
+    # Görselleştirme için eritme
+    df_melted = df_diff.melt(id_vars=["Fon"], value_vars=["Fark ($)", "Fark (£)", "Fark (Gram Altın)"], 
+                             var_name="Varlık", value_name="Miktar")
+    
+    fig = px.bar(df_melted, x="Fon", y="Miktar", color="Varlık", barmode="group",
+                 title="Fonların Alternatif Yatırımlara Karşı Birim Performansı",
+                 labels={"Miktar": "Kazanılan/Kaybedilen Birim"},
+                 color_discrete_map={"Fark ($)": "#008744", "Fark (£)": "#0057e7", "Fark (Gram Altın)": "#ffa700"})
+    
+    # Sıfır çizgisini belirginleştir
+    fig.add_hline(y=0, line_dash="dash", line_color="white")
+    st.plotly_chart(fig, use_container_width=True)
 
-    # ÖZET METRİKLER
-    st.divider()
-    m1, m2, m3 = st.columns(3)
-    total_val = df['G_Deger'].sum()
-    total_cost = df['T_Maliyet'].sum()
-    m1.metric("Toplam Portföy", f"{total_val:,.2f} ₺")
-    m2.metric("Toplam Maliyet", f"{total_cost:,.2f} ₺")
-    m3.metric("Net Kar/Zarar", f"% {((total_val/total_cost)-1)*100:.2f}", delta=f"{total_val-total_cost:,.2f} ₺")
+    
+
+    # 3. ÖZET PANELİ
+    st.subheader("🏁 Toplam Satın Alma Gücü Değişimi")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Toplam Dolar Farkı", f"{df_diff['Fark ($)'].sum():+,.2f} $")
+    c2.metric("Toplam Sterlin Farkı", f"{df_diff['Fark (£)'].sum():+,.2f} £")
+    c3.metric("Toplam Altın Farkı", f"{df_diff['Fark (Gram Altın)'].sum():+,.2f} gr")
 
 else:
-    st.info("Portföyünüz boş. Lütfen sol taraftan fon ekleyiniz.")
+    st.info("Kıyaslama için sol taraftan fon ekleyin.")
