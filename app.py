@@ -4,94 +4,122 @@ import yfinance as yf
 import json
 from datetime import datetime, timedelta
 
-# --- AYARLAR ---
-st.set_page_config(page_title="Zenith Pro: Final Çözüm", layout="wide")
+# --- 1. SİSTEM AYARLARI ---
+st.set_page_config(page_title="Zenith Portföy Pro", layout="wide")
 
-# --- BELLEK BAŞLATMA ---
-if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = []
+# Session State'i en güvenli şekilde başlatıyoruz
+if 'portfoy_listesi' not in st.session_state:
+    st.session_state['portfoy_listesi'] = []
 
-# --- FON EKLEME FONKSİYONU ---
-def add_to_portfolio(k, t, a, m, g):
-    # Geçmiş kurları çek
-    d_s = t.strftime('%Y-%m-%d')
-    u = yf.download("USDTRY=X", start=d_s, end=(t + timedelta(days=5)).strftime('%Y-%m-%d'), progress=False)
-    u_old = float(u['Close'].iloc[0]) if not u.empty else 1.0
+# --- 2. DOSYA YÖNETİMİ (SOL PANEL) ---
+with st.sidebar:
+    st.header("📂 VERİ YÜKLE")
+    dosya = st.file_uploader("Yedek JSON Seç", type=['json'], key="uploader")
     
-    new_data = {
-        "kod": k, "tarih": t, "adet": a, "maliyet": m, "guncel": g, "usd_old": u_old
-    }
-    st.session_state.portfolio.append(new_data)
+    if dosya is not None:
+        try:
+            okunan_veri = json.load(dosya)
+            # Tarihleri objeye çevir
+            for icerik in okunan_veri:
+                if isinstance(icerik.get('tarih'), str):
+                    icerik['tarih'] = datetime.strptime(icerik['tarih'], '%Y-%m-%d').date()
+            
+            # JSON verisini listeye AKTAR (Üzerine yazma, listeyi güncelle)
+            st.session_state['portfoy_listesi'] = okunan_veri
+            st.success("Yedek başarıyla içeri aktarıldı!")
+        except Exception as e:
+            st.error(f"Hata: {e}")
 
-# --- SIDEBAR: YÜKLE / İNDİR ---
-st.sidebar.header("DOSYA İŞLEMLERİ")
-up = st.sidebar.file_uploader("Yedek JSON Yükle", type=['json'])
-if up:
-    try:
-        data = json.load(up)
-        for i in data: 
-            if isinstance(i['tarih'], str): i['tarih'] = datetime.strptime(i['tarih'], '%Y-%m-%d').date()
-        st.session_state.portfolio = data
-        st.sidebar.success("Yüklendi!")
-    except: pass
+    st.divider()
+    if st.session_state['portfoy_listesi']:
+        # İndirme hazırlığı
+        indirilecek_liste = []
+        for p in st.session_state['portfoy_listesi']:
+            kopya = p.copy()
+            if hasattr(kopya['tarih'], 'strftime'):
+                kopya['tarih'] = kopya['tarih'].strftime('%Y-%m-%d')
+            indirilecek_liste.append(kopya)
+        
+        st.download_button("📥 MEVCUT LİSTEYİ YEDEKLE", 
+                           data=json.dumps(indirilecek_liste),
+                           file_name="guncel_portfoy.json",
+                           use_container_width=True)
 
-if st.session_state.portfolio:
-    save = []
-    for i in st.session_state.portfolio:
-        tmp = i.copy()
-        tmp['tarih'] = tmp['tarih'].strftime('%Y-%m-%d') if hasattr(tmp['tarih'], 'strftime') else tmp['tarih']
-        save.append(tmp)
-    st.sidebar.download_button("İndir", json.dumps(save), "yedek.json")
+# --- 3. ANA EKRAN: VERİ GİRİŞİ ---
+st.title("⚖️ Portföy Takip Sistemi")
+st.info("Aşağıdaki alanları doldurarak fon ekleyin. JSON yüklü olsa bile ekleme yapabilirsiniz.")
 
-# --- ANA EKRAN: GİRİŞ ALANLARI ---
-st.title("🛡️ Zenith Pro: Kesin Kayıt")
+# Giriş alanlarını alt alta ve birbirinden bağımsız anahtarlarla (key) tanımlıyoruz
+v_kod = st.text_input("1. FON KODU (ÖRN: TCD)", key="v1").upper().strip()
+v_tar = st.date_input("2. ALIŞ TARİHİ", value=datetime.now() - timedelta(days=30), key="v2")
+v_adet = st.number_input("3. SATIN ALINAN ADET", value=0.0, format="%.4f", key="v3")
+v_alis = st.number_input("4. ALIŞTAKİ BİRİM FİYAT (TL)", value=0.0, format="%.4f", key="v4")
 
-# HİÇBİR SÜTUN VEYA FORM KULLANMADAN, ALT ALTA EN GÜVENLİ GİRİŞ
-st.warning("Aşağıdaki tüm kutuları doldurup 'KAYDET' butonuna basın.")
+# İşte kaybolan o meşhur hücre - İsmini ve yerini değiştirdik
+v_guncel_fiyat = st.number_input("5. ŞU ANKİ GÜNCEL BİRİM FİYAT (TL)", value=0.0, format="%.4f", key="v5_guncel")
 
-kod_input = st.text_input("1. FON KODU (Örn: TCD, USDTRY=X, BTC-USD)").upper()
-tar_input = st.date_input("2. ALIŞ TARİHİ", value=datetime.now() - timedelta(days=30))
-adet_input = st.number_input("3. ADET (Miktar)", value=0.0, format="%.4f")
-alis_input = st.number_input("4. BİRİM ALIŞ FİYATI (TL)", value=0.0, format="%.4f")
-gun_input = st.number_input("5. BİRİM GÜNCEL FİYAT (TL)", value=0.0, format="%.4f")
-
-if st.button("✅ PORTFÖYE KAYDET"):
-    if kod_input and adet_input > 0:
-        add_to_portfolio(kod_input, tar_input, adet_input, alis_input, gun_input)
-        st.success(f"{kod_input} eklendi! Sayfa yenileniyor...")
-        st.rerun()
+if st.button("➕ PORTFÖYE ŞİMDİ EKLE", use_container_width=True):
+    if v_kod and v_adet > 0:
+        with st.spinner("Kurlar alınıyor..."):
+            t_str = v_tar.strftime('%Y-%m-%d')
+            # Dolar kurunu çek
+            u_data = yf.download("USDTRY=X", start=t_str, end=(v_tar + timedelta(days=5)).strftime('%Y-%m-%d'), progress=False)
+            u_eski = float(u_data['Close'].iloc[0]) if not u_data.empty else 1.0
+            
+            # Yeni kaydı oluştur
+            yeni_kayit = {
+                "kod": v_kod,
+                "tarih": v_tar,
+                "adet": v_adet,
+                "maliyet": v_alis,
+                "guncel": v_guncel_fiyat if v_guncel_fiyat > 0 else v_alis,
+                "usd_old": u_eski
+            }
+            
+            # Listeye ekle (Session State'i doğrudan manipüle et)
+            st.session_state['portfoy_listesi'].append(yeni_kayit)
+            st.success(f"{v_kod} eklendi!")
+            st.rerun()
     else:
-        st.error("Kod ve Adet boş olamaz!")
+        st.error("Lütfen en azından Kod ve Adet kısımlarını doldurun!")
 
 st.divider()
 
-# --- TABLO ---
-if st.session_state.portfolio:
-    st.subheader("📊 Mevcut Kayıtlar")
+# --- 4. TABLO VE HESAPLAR ---
+if st.session_state['portfoy_listesi']:
+    st.subheader("📊 Portföy Durumu")
     
-    # Mevcut verileri tabloya dönüştür
-    u_now = yf.download("USDTRY=X", period="1d", progress=False)['Close'].iloc[-1]
+    # Güncel doları çek
+    u_simdi = yf.download("USDTRY=X", period="1d", progress=False)['Close'].iloc[-1]
     
-    rows = []
-    for i, item in enumerate(st.session_state.portfolio):
-        m_toplam = item['adet'] * item['maliyet']
-        g_toplam = item['adet'] * item['guncel']
+    tablo_verisi = []
+    for i, kalem in enumerate(st.session_state['portfoy_listesi']):
+        ana_para = kalem['adet'] * kalem['maliyet']
+        son_deger = kalem['adet'] * kalem['guncel']
         
-        rows.append({
-            "Kod": item['kod'],
-            "Adet": item['adet'],
-            "Maliyet (₺)": m_toplam,
-            "Güncel (₺)": g_toplam,
-            "K/Z (₺)": g_toplam - m_toplam,
-            "Dolar Farkı ($)": (g_toplam / u_now) - (m_toplam / item['usd_old'])
+        tablo_verisi.append({
+            "FON": kalem['kod'],
+            "TARİH": kalem['tarih'],
+            "TOPLAM MALİYET": f"{ana_para:,.2f} TL",
+            "GÜNCEL DEĞER": f"{son_deger:,.2f} TL",
+            "K/Z (TL)": f"{(son_deger - ana_para):,.2f} TL",
+            "DOLAR BAZLI FARK": f"{((son_deger / u_simdi) - (ana_para / kalem['usd_old'])):,.2f} $"
         })
         
-        # SİLME BUTONU (Her satırın altına küçük bir buton)
-        if st.button(f"🗑️ {item['kod']} Sil", key=f"del_{i}"):
-            st.session_state.portfolio.pop(i)
+        # Silme seçeneği
+        if st.button(f"🗑️ {kalem['kod']} ({kalem['tarih']}) Kaydını Sil", key=f"btn_{i}"):
+            st.session_state['portfoy_listesi'].pop(i)
             st.rerun()
-            
-    st.table(pd.DataFrame(rows)) # En basit tablo formatı
+
+    st.table(tablo_verisi)
+
+    # Genel Toplamlar
+    toplam_m = sum(k['adet'] * k['maliyet'] for k in st.session_state['portfoy_listesi'])
+    toplam_g = sum(k['adet'] * k['guncel'] for k in st.session_state['portfoy_listesi'])
+    
+    c1, c2 = st.columns(2)
+    c1.metric("TOPLAM ANA PARA", f"{toplam_m:,.2f} TL")
+    c2.metric("TOPLAM PORTFÖY", f"{toplam_g:,.2f} TL", delta=f"{toplam_g - toplam_m:,.2f} TL")
 
 else:
-    st.info("Kayıt bulunamadı. Lütfen yukarıdan fon ekleyin.")
+    st.info("Portföyünüz boş. Yukarıdaki 5 adımı doldurarak ekleme yapın.")
